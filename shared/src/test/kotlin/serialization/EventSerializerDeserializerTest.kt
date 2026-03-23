@@ -1,6 +1,5 @@
 package serialization
 
-import com.fasterxml.jackson.core.type.TypeReference
 import com.orderprocessing.shared.envelope.EventEnvelope
 import com.orderprocessing.shared.events.InventoryReserved
 import com.orderprocessing.shared.events.OrderFailed
@@ -13,6 +12,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
+import tools.jackson.core.type.TypeReference
 import java.math.BigDecimal
 import java.time.Instant
 import java.util.UUID
