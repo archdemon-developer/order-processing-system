@@ -49,6 +49,7 @@ Client → order-service (REST)
 | Orchestration | Minikube + Helm |
 | Observability | OpenTelemetry, Prometheus, Grafana, Loki, Tempo |
 | CI/CD | GitLab CI |
+| Code Quality | Spotless + ktlint |
 
 ---
 
@@ -69,6 +70,8 @@ order-processing-system/
 │           ├── EventSerializer.kt
 │           └── EventDeserializer.kt
 ├── order-service/
+│   ├── Dockerfile
+│   └── src/
 ├── payment-service/
 ├── inventory-service/
 ├── notification-service/
@@ -76,7 +79,8 @@ order-processing-system/
 ├── infra/
 │   ├── docker-compose.yml
 │   └── postgres/init.sql
-├── build.gradle.kts                # Root build — JaCoCo, Kotlin, Spring Boot plugins
+├── .gitlab-ci.yml
+├── build.gradle.kts                # Root build — plugins, JaCoCo, Spotless
 └── settings.gradle.kts
 ```
 
@@ -118,10 +122,8 @@ Base path: `/api/v1/orders`
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/api/v1/orders` | Place a new order |
-| `GET` | `/api/v1/orders/{orderId}` | Retrieve order by ID |
-| `GET` | `/api/v1/orders/customer/{customerId}` | Retrieve all orders for a customer |
 
-Swagger UI available at `/swagger-ui.html` when running locally.
+Swagger UI available at `http://localhost:8080/swagger-ui.html` when running locally.
 
 ### Request Body — POST /api/v1/orders
 
@@ -198,36 +200,116 @@ No relational database. State maintained in Kafka Streams state stores (RocksDB-
 
 ---
 
-## Local Setup
+## Local Development
 
 ### Prerequisites
-- Docker Engine 29+ and Docker Compose v2+
+- Docker Engine 27+ and Docker Compose v2+
 - JDK 21
-- Gradle (or use the wrapper)
+- Gradle (or use the wrapper `./gradlew`)
 
-### Start Infrastructure
+### Start Everything (Recommended)
+
+Builds and starts all services and infrastructure in Docker:
 
 ```bash
-cd infra
-docker compose up -d
+docker compose -f infra/docker-compose.yml up --build -d
 ```
 
 This starts:
-- Kafka (KRaft mode, port 9092)
-- PostgreSQL 17 (port 5432) — creates `orders_db`, `payments_db`, `inventory_db`
-- Redis (port 6379)
+- Kafka (KRaft mode) — ports `9092` (container-to-container), `29092` (host access)
+- PostgreSQL 17 — port `5432` — creates `orders_db`, `payments_db`, `inventory_db`
+- Redis — port `6379`
+- `order-service` — port `8080`
 
-### Build
-
-```bash
-./gradlew build
-```
-
-### Run order-service
+To bring everything down:
 
 ```bash
-./gradlew :order-service:bootRun
+docker compose -f infra/docker-compose.yml down
 ```
+
+To also wipe the PostgreSQL volume (clean slate):
+
+```bash
+docker compose -f infra/docker-compose.yml down -v
+```
+
+### Run order-service Locally (Against Containerised Infra)
+
+Start only the infrastructure:
+
+```bash
+docker compose -f infra/docker-compose.yml up kafka postgres redis -d
+```
+
+Then run the service locally:
+
+```bash
+./gradlew :order-service:bootRun -Dspring.profiles.active=local
+```
+
+The `local` profile connects to `localhost:29092` for Kafka and `localhost:5432` for PostgreSQL.
+
+### Spring Profiles
+
+| Profile | Used when |
+|---|---|
+| `local` | Running service via `bootRun` against containerised infra |
+| `docker` | Running service inside Docker Compose |
+| `k8s` | Running in Kubernetes (Minikube/Helm) |
+| `test` | Integration tests via Testcontainers |
+
+---
+
+## Code Quality
+
+### Formatting
+
+The project uses [Spotless](https://github.com/diffplug/spotless) with [ktlint](https://pinterest.github.io/ktlint/) for Kotlin formatting.
+
+Auto-format all files:
+
+```bash
+./gradlew spotlessApply
+```
+
+Check formatting without modifying files (what CI runs):
+
+```bash
+./gradlew spotlessCheck
+```
+
+### Test Coverage
+
+JaCoCo enforces minimum coverage thresholds on every build:
+
+| Counter | Threshold |
+|---|---|
+| Instruction | 90% |
+| Branch | 80% |
+
+Run tests with coverage verification:
+
+```bash
+./gradlew check
+```
+
+Coverage reports are generated at `build/reports/jacoco/` per module.
+
+---
+
+## CI/CD Pipeline
+
+GitLab CI pipeline at `.gitlab-ci.yml`. Runs on every push to every branch.
+
+| Stage | Jobs | Runs on |
+|---|---|---|
+| `validate` | Spotless formatting check | All branches |
+| `test` | Unit tests and integration tests (parallel) | All branches |
+| `coverage` | JaCoCo verification, report published as artifact | All branches |
+| `build` | Build Docker image, push to GitLab registry | `main` only |
+| `deploy` | Placeholder — Minikube/Helm (coming soon) | `main` only |
+
+Docker images are tagged with both the commit SHA (`order-service:abc1234`) and `latest`.
 
 ---
 
@@ -250,8 +332,11 @@ All services emit traces, metrics, and structured logs via OpenTelemetry:
 | Explicit `order-failed` event | Avoids a `payment-processed` event with a `FAILED` status field, which creates ambiguous consumer contracts. |
 | `PENDING` status only (initial) | Order status lifecycle (`PENDING → CONFIRMED → FAILED`) will expand as downstream services are built. |
 | Flyway owns the schema | `hibernate.ddl-auto=validate`. Hibernate validates against the schema, never modifies it. |
-| Single PostgreSQL container | Three logical databases on one container for local resource efficiency. Production would use isolated instances per service. |
+| Single PostgreSQL container (local) | Three logical databases on one container for local resource efficiency. Production would use isolated instances per service. |
 | KRaft mode (no ZooKeeper) | Confluent Platform 8.0 removed ZooKeeper. Single Kafka container with `KAFKA_PROCESS_ROLES: broker,controller`. |
+| Dual Kafka listeners | `kafka:9092` for container-to-container communication inside Docker; `localhost:29092` for host machine access during local development. Single listener would require different images per environment. |
+| Profile-agnostic Docker image | Spring profile is not baked into the Dockerfile. It is injected via `SPRING_PROFILES_ACTIVE` at the orchestration layer (Docker Compose env var, K8s pod spec). The same image runs in all environments. |
+| Multi-stage layered Dockerfile | Build stage compiles and extracts JAR layers; runtime stage uses `eclipse-temurin:21-jre-alpine`. Dependencies layer is cached separately from application code — fast rebuilds on code-only changes. |
 
 ---
 
@@ -265,6 +350,7 @@ These are deliberate trade-offs made to ship a working implementation. Each is a
 | Payment is a simulation, not a live gateway | Stripe / Adyen sandbox integration |
 | Inventory reservation always succeeds | Stock quantity checking with `inventory` table, failure path via `order-failed` |
 | No authentication / authorisation | JWT via Spring Security |
+| Testcontainers reuse not enabled | Enable Testcontainers reuse to avoid container startup cost on repeated local test runs |
 
 ---
 
@@ -274,10 +360,13 @@ These are deliberate trade-offs made to ship a working implementation. Each is a
 - [x] Project structure + Gradle multi-module setup
 - [x] Docker Compose baseline (Kafka, PostgreSQL, Redis)
 - [x] `order-service` — REST API, validation, persistence, `order-placed` producer
+- [x] `order-service` — unit tests + integration tests (Testcontainers), JaCoCo coverage
+- [x] `order-service` — multi-stage Dockerfile, added to Docker Compose
+- [x] Code quality — Spotless + ktlint
+- [x] GitLab CI pipeline — validate, test, coverage, build, deploy stages
 - [ ] `payment-service` — consumer, idempotency, producers
 - [ ] `inventory-service` — consumer, reservation, producer
 - [ ] `notification-service` — listeners, mock dispatch
 - [ ] `analytics-service` — Kafka Streams topology
 - [ ] Observability — OpenTelemetry, Grafana dashboards
 - [ ] Kubernetes + Helm — Minikube manifests, Helm chart per service
-- [ ] GitLab CI — build, test, package, deploy pipelines
