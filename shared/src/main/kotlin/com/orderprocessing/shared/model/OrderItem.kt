@@ -6,5 +6,5 @@ import java.util.UUID
 data class OrderItem(
     val productId: UUID,
     val quantity: Int,
-    val pricePerItem: BigDecimal
+    val pricePerItem: BigDecimal,
 )

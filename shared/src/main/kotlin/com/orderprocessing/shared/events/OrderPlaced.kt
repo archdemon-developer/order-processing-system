@@ -8,5 +8,5 @@ data class OrderPlaced(
     val orderId: UUID,
     val customerId: UUID,
     val items: List<OrderItem>,
-    var totalPrice: BigDecimal
+    var totalPrice: BigDecimal,
 )

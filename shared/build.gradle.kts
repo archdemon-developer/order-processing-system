@@ -6,6 +6,19 @@ repositories {
     mavenCentral()
 }
 
+apply(plugin = "com.diffplug.spotless")
+
+configure<com.diffplug.gradle.spotless.SpotlessExtension> {
+    kotlin {
+        target("**/*.kt")
+        ktlint("1.7.1")
+    }
+    kotlinGradle {
+        target("**/*.gradle.kts")
+        ktlint("1.7.1")
+    }
+}
+
 dependencies {
     implementation(platform("tools.jackson:jackson-bom:3.1.0"))
     implementation("tools.jackson.module:jackson-module-kotlin:3.1.0")

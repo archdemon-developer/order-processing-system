@@ -1,8 +1,4 @@
 spring:
-  application:
-    name: order-service
-  profiles:
-    active: local
   datasource:
     url: jdbc:postgresql://localhost:5432/orders_db
     username: postgres
@@ -20,7 +16,7 @@ spring:
     locations: classpath:db/migration
 
 kafka:
-  bootstrap-servers: localhost:9092
+  bootstrap-servers: localhost:29092
 
 springdoc:
   swagger-ui:

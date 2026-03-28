@@ -8,4 +8,5 @@ import java.util.UUID
 
 data class CreateOrderRequest(
     @field:NotNull val customerId: UUID,
-    @field:NotEmpty @field:Valid val items: List<OrderItemRequest>)
+    @field:NotEmpty @field:Valid val items: List<OrderItemRequest>,
+)

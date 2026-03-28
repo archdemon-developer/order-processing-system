@@ -7,5 +7,5 @@ data class EventEnvelope<T>(
     val eventId: UUID,
     val eventType: String,
     val occurredAt: Instant,
-    val payload: T
+    val payload: T,
 )

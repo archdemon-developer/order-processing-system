@@ -6,7 +6,8 @@ import jakarta.validation.constraints.NotNull
 import java.math.BigDecimal
 import java.util.UUID
 
-data class OrderItemRequest (
+data class OrderItemRequest(
     @field:NotNull val productId: UUID,
     @field:Min(1) val quantity: Int,
-    @field:DecimalMin("0.01") val pricePerItem: BigDecimal)
+    @field:DecimalMin("0.01") val pricePerItem: BigDecimal,
+)

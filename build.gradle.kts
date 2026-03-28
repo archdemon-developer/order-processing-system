@@ -3,6 +3,7 @@ plugins {
     kotlin("plugin.spring") version "2.2.21" apply false
     kotlin("plugin.jpa") version "2.2.21" apply false
     id("org.springframework.boot") version "4.0.4" apply false
+    id("com.diffplug.spotless") version "8.3.0" apply false
 }
 
 subprojects {
@@ -36,10 +37,16 @@ subprojects {
     }
 
     tasks.withType<JacocoCoverageVerification> {
+        dependsOn(tasks.withType<JacocoReport>())
         violationRules {
             rule {
                 limit {
+                    counter = "INSTRUCTION"
                     minimum = "0.90".toBigDecimal()
+                }
+                limit {
+                    counter = "BRANCH"
+                    minimum = "0.80".toBigDecimal()
                 }
             }
         }

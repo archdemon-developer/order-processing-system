@@ -14,10 +14,11 @@ import org.springframework.web.bind.annotation.RestController
 
 @RestController
 @RequestMapping("/api/v1/orders")
-class OrderProcessingController (private val orderService: OrderService){
-
+class OrderProcessingController(
+    private val orderService: OrderService,
+) {
     @PostMapping(consumes = [MediaType.APPLICATION_JSON_VALUE], produces = [MediaType.APPLICATION_JSON_VALUE])
-    fun processOrder(@Valid @RequestBody createOrderRequest: CreateOrderRequest): ResponseEntity<CreateOrderResponse> {
-        return ResponseEntity.status(HttpStatus.CREATED).body(orderService.createOrder(createOrderRequest))
-    }
+    fun processOrder(
+        @Valid @RequestBody createOrderRequest: CreateOrderRequest,
+    ): ResponseEntity<CreateOrderResponse> = ResponseEntity.status(HttpStatus.CREATED).body(orderService.createOrder(createOrderRequest))
 }
