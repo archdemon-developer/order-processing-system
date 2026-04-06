@@ -15,6 +15,7 @@ import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.extension.ExtendWith
@@ -24,6 +25,7 @@ import java.math.BigDecimal
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 
+@Tag("unit")
 @ExtendWith(MockKExtension::class)
 class OrderServiceTest {
     @MockK lateinit var orderRepository: OrderRepository

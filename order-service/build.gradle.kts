@@ -20,6 +20,17 @@ configure<com.diffplug.gradle.spotless.SpotlessExtension> {
     }
 }
 
+tasks.test {
+    useJUnitPlatform {
+        val groups = System.getProperty("groups")
+        if (groups != null) {
+            includeTags(groups)
+        } else {
+            excludeTags("integration")
+        }
+    }
+}
+
 dependencies {
     implementation(platform(SpringBootPlugin.BOM_COORDINATES))
     implementation("tools.jackson.module:jackson-module-kotlin")

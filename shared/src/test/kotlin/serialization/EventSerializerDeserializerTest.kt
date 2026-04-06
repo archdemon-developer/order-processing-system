@@ -11,12 +11,14 @@ import com.orderprocessing.shared.serialization.EventSerializer
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import tools.jackson.core.type.TypeReference
 import java.math.BigDecimal
 import java.time.Instant
 import java.util.UUID
 
+@Tag("unit")
 class EventSerializerDeserializerTest {
     private val serializer = EventSerializer<EventEnvelope<*>>()
     private val topic = "test-topic"
