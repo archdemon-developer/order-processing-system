@@ -40,6 +40,7 @@ unit-tests:
       junit: "**/build/test-results/test/TEST-*.xml"
     paths:
       - "**/build/reports/tests/"
+      - "**/build/jacoco/test.exec"
     expire_in: 7 days
   rules:
     - if: $CI_COMMIT_BRANCH
@@ -66,6 +67,7 @@ integration-tests:
       junit: "**/build/test-results/integrationTest/TEST-*.xml"
     paths:
       - "**/build/reports/tests/"
+      - "**/build/jacoco/integrationTest.exec"
     expire_in: 7 days
   rules:
     - if: $CI_COMMIT_BRANCH
