@@ -1,6 +1,6 @@
-import org.springframework.boot.gradle.plugin.SpringBootPlugin
 import org.gradle.testing.jacoco.plugins.JacocoTaskExtension
 import org.gradle.testing.jacoco.tasks.JacocoCoverageVerification
+import org.springframework.boot.gradle.plugin.SpringBootPlugin
 plugins {
     kotlin("jvm")
     kotlin("plugin.spring")
@@ -42,7 +42,7 @@ tasks.jacocoTestReport {
     executionData.setFrom(
         fileTree(layout.buildDirectory.get()) {
             include("jacoco/*.exec")
-        }
+        },
     )
     reports {
         xml.required.set(true)
@@ -54,7 +54,7 @@ tasks.withType<JacocoCoverageVerification> {
     executionData.setFrom(
         fileTree(layout.buildDirectory.get()) {
             include("jacoco/*.exec")
-        }
+        },
     )
 }
 
