@@ -1,11 +1,15 @@
 spring:
   profiles:
-    active: docker
+    active: k8s
   datasource:
-    url: jdbc:postgresql://postgres:5432/orders_db
+    url: jdbc:postgresql://postgres:5432/payments_db
     username: postgres
     password: postgres
     driver-class-name: org.postgresql.Driver
+  data:
+    redis:
+      host: redis
+      port: 6379
   jpa:
     hibernate:
       ddl-auto: validate
@@ -20,8 +24,8 @@ spring:
 kafka:
   bootstrap-servers: kafka:9092
 
-springdoc:
-  swagger-ui:
-    enabled: true
-  api-docs:
-    enabled: true
+payment:
+  failure-rate: 0.3
+  retry:
+    max-attempts: 3
+    delay-ms: 2000

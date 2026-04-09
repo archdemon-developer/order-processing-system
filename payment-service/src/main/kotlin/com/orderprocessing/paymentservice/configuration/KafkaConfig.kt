@@ -1,0 +1,60 @@
+package com.orderprocessing.paymentservice.configuration
+
+import com.orderprocessing.shared.envelope.EventEnvelope
+import com.orderprocessing.shared.events.OrderPlaced
+import com.orderprocessing.shared.serialization.EventDeserializer
+import com.orderprocessing.shared.serialization.EventSerializer
+import org.apache.kafka.clients.consumer.ConsumerConfig
+import org.apache.kafka.clients.producer.ProducerConfig
+import org.apache.kafka.common.serialization.StringDeserializer
+import org.apache.kafka.common.serialization.StringSerializer
+import org.springframework.beans.factory.annotation.Value
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Configuration
+import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory
+import org.springframework.kafka.core.ConsumerFactory
+import org.springframework.kafka.core.DefaultKafkaConsumerFactory
+import org.springframework.kafka.core.DefaultKafkaProducerFactory
+import org.springframework.kafka.core.KafkaTemplate
+import org.springframework.kafka.core.ProducerFactory
+import tools.jackson.core.type.TypeReference
+
+@Configuration
+class KafkaConfig(
+    @param:Value($$"${kafka.bootstrap-servers}") private val bootstrapServers: String,
+) {
+    @Bean
+    fun producerFactory(): ProducerFactory<String, EventEnvelope<*>> {
+        val config =
+            mapOf(
+                ProducerConfig.BOOTSTRAP_SERVERS_CONFIG to bootstrapServers,
+                ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG to StringSerializer::class.java,
+                ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG to EventSerializer::class.java,
+            )
+        return DefaultKafkaProducerFactory(config)
+    }
+
+    @Bean
+    fun consumerFactory(): ConsumerFactory<String, EventEnvelope<OrderPlaced>> {
+        val config =
+            mapOf(
+                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG to bootstrapServers,
+                ConsumerConfig.GROUP_ID_CONFIG to "payment-service",
+            )
+
+        return DefaultKafkaConsumerFactory(
+            config,
+            StringDeserializer(),
+            EventDeserializer(object : TypeReference<EventEnvelope<OrderPlaced>>() {}),
+        )
+    }
+
+    @Bean
+    fun kafkaListenerContainerFactory(): ConcurrentKafkaListenerContainerFactory<String, EventEnvelope<OrderPlaced>> =
+        ConcurrentKafkaListenerContainerFactory<String, EventEnvelope<OrderPlaced>>().apply {
+            setConsumerFactory(consumerFactory())
+        }
+
+    @Bean
+    fun kafkaTemplate(): KafkaTemplate<String, EventEnvelope<*>> = KafkaTemplate(producerFactory())
+}
