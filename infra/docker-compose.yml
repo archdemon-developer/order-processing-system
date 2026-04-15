@@ -4,6 +4,7 @@ services:
     container_name: kafka
     ports:
       - "9092:9092"
+      - "29092:29092"
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -46,5 +47,17 @@ services:
     depends_on:
       - kafka
       - postgres
+
+  payment-service:
+    build:
+      context: ../
+      dockerfile: payment-service/Dockerfile
+    container_name: payment-service
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    depends_on:
+      - kafka
+      - postgres
+      - redis
 volumes:
   postgres_data:
