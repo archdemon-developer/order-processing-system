@@ -1,6 +1,4 @@
 spring:
-  profiles:
-    active: k8s
   datasource:
     url: jdbc:postgresql://localhost:5432/orders_db
     username: postgres

@@ -2,6 +2,7 @@ package com.orderprocessing.paymentservice.configuration
 
 import com.orderprocessing.shared.envelope.EventEnvelope
 import com.orderprocessing.shared.events.OrderPlaced
+import com.orderprocessing.shared.events.PaymentRetry
 import com.orderprocessing.shared.serialization.EventDeserializer
 import com.orderprocessing.shared.serialization.EventSerializer
 import org.apache.kafka.clients.consumer.ConsumerConfig
@@ -35,7 +36,7 @@ class KafkaConfig(
     }
 
     @Bean
-    fun consumerFactory(): ConsumerFactory<String, EventEnvelope<OrderPlaced>> {
+    fun orderPlacedConsumerFactory(): ConsumerFactory<String, EventEnvelope<OrderPlaced>> {
         val config =
             mapOf(
                 ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG to bootstrapServers,
@@ -50,9 +51,29 @@ class KafkaConfig(
     }
 
     @Bean
-    fun kafkaListenerContainerFactory(): ConcurrentKafkaListenerContainerFactory<String, EventEnvelope<OrderPlaced>> =
+    fun retryConsumerFactory(): ConsumerFactory<String, EventEnvelope<PaymentRetry>> {
+        val config =
+            mapOf(
+                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG to bootstrapServers,
+                ConsumerConfig.GROUP_ID_CONFIG to "payment-service",
+            )
+        return DefaultKafkaConsumerFactory(
+            config,
+            StringDeserializer(),
+            EventDeserializer(object : TypeReference<EventEnvelope<PaymentRetry>>() {}),
+        )
+    }
+
+    @Bean
+    fun retryKafkaListenerContainerFactory(): ConcurrentKafkaListenerContainerFactory<String, EventEnvelope<PaymentRetry>> =
+        ConcurrentKafkaListenerContainerFactory<String, EventEnvelope<PaymentRetry>>().apply {
+            setConsumerFactory(retryConsumerFactory())
+        }
+
+    @Bean
+    fun orderPlacedKafkaListenerContainerFactory(): ConcurrentKafkaListenerContainerFactory<String, EventEnvelope<OrderPlaced>> =
         ConcurrentKafkaListenerContainerFactory<String, EventEnvelope<OrderPlaced>>().apply {
-            setConsumerFactory(consumerFactory())
+            setConsumerFactory(orderPlacedConsumerFactory())
         }
 
     @Bean

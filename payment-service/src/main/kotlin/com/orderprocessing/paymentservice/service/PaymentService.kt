@@ -30,14 +30,19 @@ class PaymentService(
         }
 
         if (simulatePayment()) {
-            handleSuccess(envelope.payload.orderId, envelope.payload.customerId, buildPayment(envelope.payload, PaymentStatus.SUCCESS,  UUID.randomUUID()))
+            handleSuccess(
+                envelope.payload.orderId,
+                envelope.payload.customerId,
+                buildPayment(envelope.payload, PaymentStatus.SUCCESS, UUID.randomUUID()),
+            )
             return
         }
 
-        val failedPayment = buildPayment(envelope.payload, PaymentStatus.RETRYING,  null)
+        val failedPayment = buildPayment(envelope.payload, PaymentStatus.RETRYING, null)
         paymentRepository.save(failedPayment)
         kafkaTemplate.send(
             "payment-retry",
+            failedPayment.orderId.toString(),
             buildEnvelope(
                 "payment-retry",
                 PaymentRetry(
@@ -52,23 +57,24 @@ class PaymentService(
     }
 
     fun processRetry(envelope: EventEnvelope<PaymentRetry>) {
-        if(isAlreadyProcessed(envelope.payload.orderId)) {
+        if (isAlreadyProcessed(envelope.payload.orderId)) {
             return
         }
 
         val earlierPayment = paymentRepository.findByOrderId(envelope.payload.orderId).orElseThrow()
 
-        if(envelope.payload.attempts >= paymentProperties.retry.maxAttempts) {
+        if (envelope.payload.attempts >= paymentProperties.retry.maxAttempts) {
             earlierPayment.status = PaymentStatus.FAILED
             paymentRepository.save(earlierPayment)
             kafkaTemplate.send(
                 "order-failed",
+                earlierPayment.orderId.toString(),
                 buildEnvelope(
                     "order-failed",
                     OrderFailed(
                         orderId = envelope.payload.orderId,
                         customerId = envelope.payload.customerId,
-                        reason = "Order processing failed"
+                        reason = "Order processing failed",
                     ),
                 ),
             )
@@ -83,35 +89,44 @@ class PaymentService(
 
         earlierPayment.attempts = envelope.payload.attempts + 1
         paymentRepository.save(earlierPayment)
-        kafkaTemplate.send(
-            "payment-retry",
-            buildEnvelope(
+        kafkaTemplate
+            .send(
                 "payment-retry",
-                PaymentRetry(
-                    orderId = envelope.payload.orderId,
-                    customerId = envelope.payload.customerId,
-                    items = envelope.payload.items,
-                    totalPrice = envelope.payload.totalPrice,
-                    attempts = envelope.payload.attempts + 1,
+                earlierPayment.orderId.toString(),
+                buildEnvelope(
+                    "payment-retry",
+                    PaymentRetry(
+                        orderId = envelope.payload.orderId,
+                        customerId = envelope.payload.customerId,
+                        items = envelope.payload.items,
+                        totalPrice = envelope.payload.totalPrice,
+                        attempts = envelope.payload.attempts + 1,
+                    ),
                 ),
-            ),
-        )
+            ).get()
     }
 
-    private fun handleSuccess(orderId: UUID, customerId: UUID, payment: Payment) {
+    private fun handleSuccess(
+        orderId: UUID,
+        customerId: UUID,
+        payment: Payment,
+    ) {
         paymentRepository.save(payment)
-        redisTemplate.opsForValue()
+
+        redisTemplate
+            .opsForValue()
             .set("idempotency:payment:$orderId", "processed", 24, TimeUnit.HOURS)
         kafkaTemplate.send(
             "payment-processed",
+            payment.orderId.toString(),
             buildEnvelope(
                 "payment-processed",
                 PaymentProcessed(
                     orderId = orderId,
                     transactionId = UUID.randomUUID(),
-                    customerId = customerId
-                )
-            )
+                    customerId = customerId,
+                ),
+            ),
         )
     }
 
@@ -119,17 +134,20 @@ class PaymentService(
         orderPlaced: OrderPlaced,
         paymentStatus: PaymentStatus,
         transactionId: UUID?,
-    ) : Payment = Payment().apply {
-        this.orderId = orderPlaced.orderId
-        this.customerId = orderPlaced.customerId
-        this.transactionId = transactionId
-        this.status = paymentStatus
-        this.attempts = 1
-    }
+    ): Payment =
+        Payment().apply {
+            this.orderId = orderPlaced.orderId
+            this.customerId = orderPlaced.customerId
+            this.transactionId = transactionId
+            this.status = paymentStatus
+            this.attempts = 1
+        }
 
-    private fun isAlreadyProcessed(orderId: UUID): Boolean =
-        redisTemplate.hasKey("idempotency:payment:$orderId") == true ||
-            paymentRepository.existsByOrderId(orderId)
+    private fun isAlreadyProcessed(orderId: UUID): Boolean {
+        if (redisTemplate.hasKey("idempotency:payment:$orderId") == true) return true
+        val payment = paymentRepository.findByOrderId(orderId).orElse(null) ?: return false
+        return payment.status == PaymentStatus.SUCCESS || payment.status == PaymentStatus.FAILED
+    }
 
     private fun simulatePayment(): Boolean = Random.nextDouble() > paymentProperties.failureRate
 

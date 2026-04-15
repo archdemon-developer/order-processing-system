@@ -33,7 +33,7 @@ unit-tests:
   stage: test
   image: eclipse-temurin:21-jdk-alpine
   script:
-    - ./gradlew :shared:test :order-service:test --no-daemon
+    - ./gradlew :shared:test :order-service:test :payment-service:test --no-daemon
   artifacts:
     when: always
     reports:
@@ -60,7 +60,7 @@ integration-tests:
     - apk add --no-cache openjdk21
     - export JAVA_HOME=$(dirname $(dirname $(readlink -f $(which java))))
   script:
-    - ./gradlew :order-service:test --no-daemon -Dgroups=integration
+    - ./gradlew :order-service:test :payment-service:test --no-daemon -Dgroups=integration
   artifacts:
     when: always
     reports:
@@ -80,6 +80,7 @@ coverage:
   script:
     - ./gradlew :shared:jacocoTestReport :shared:jacocoCoverageVerification --no-daemon
     - ./gradlew :order-service:jacocoTestReport :order-service:jacocoCoverageVerification --no-daemon
+    - ./gradlew :payment-service:jacocoTestReport :payment-service:jacocoCoverageVerification --no-daemon
   artifacts:
     when: always
     paths:

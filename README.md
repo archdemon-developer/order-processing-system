@@ -26,7 +26,7 @@ Client → order-service (REST)
 | Service | Responsibility |
 |---|---|
 | `order-service` | Accepts orders via REST, publishes `order-placed` event |
-| `payment-service` | Consumes `order-placed`, simulates payment, publishes `payment-processed` or `order-failed` |
+| `payment-service` | Consumes `order-placed`, simulates payment with retry, publishes `payment-processed` or `order-failed` |
 | `inventory-service` | Consumes `payment-processed`, reserves stock, publishes `inventory-reserved` |
 | `notification-service` | Consumes terminal events, sends mock notifications |
 | `analytics-service` | Kafka Streams consumer, real-time aggregations |
@@ -43,7 +43,7 @@ Client → order-service (REST)
 | Messaging | Apache Kafka (KRaft mode), Kafka Streams |
 | Serialization | Custom Jackson-based `EventSerializer` / `EventDeserializer` (shared module) |
 | Database | PostgreSQL 17 (one logical DB per service) |
-| Cache / Idempotency | Redis (payment-service) |
+| Cache / Idempotency | Redis (`payment-service`) |
 | API Docs | springdoc-openapi 3.x (Swagger UI) |
 | Containerisation | Docker, Docker Compose |
 | Orchestration | Minikube + Helm |
@@ -63,6 +63,7 @@ order-processing-system/
 │       ├── events/
 │       │   ├── OrderPlaced.kt
 │       │   ├── PaymentProcessed.kt
+│       │   ├── PaymentRetry.kt
 │       │   ├── InventoryReserved.kt
 │       │   └── OrderFailed.kt
 │       ├── model/OrderItem.kt
@@ -73,6 +74,8 @@ order-processing-system/
 │   ├── Dockerfile
 │   └── src/
 ├── payment-service/
+│   ├── Dockerfile
+│   └── src/
 ├── inventory-service/
 ├── notification-service/
 ├── analytics-service/
@@ -91,6 +94,7 @@ order-processing-system/
 | Topic | Producer | Consumers |
 |---|---|---|
 | `order-placed` | `order-service` | `payment-service`, `analytics-service` |
+| `payment-retry` | `payment-service` | `payment-service` |
 | `payment-processed` | `payment-service` | `inventory-service`, `notification-service` |
 | `order-failed` | `payment-service` | `notification-service` |
 | `inventory-reserved` | `inventory-service` | `notification-service`, `analytics-service` |
@@ -105,7 +109,7 @@ order-processing-system/
 2. `order-service` validates the request, persists the order, and publishes `order-placed`
 3. `payment-service` consumes `order-placed`:
    - Success → publishes `payment-processed`
-   - Failure → publishes `order-failed` (explicit failure event, no ambiguous status field)
+   - Failure → publishes `payment-retry` (up to `max-attempts`), then `order-failed` on exhaustion
 4. `inventory-service` consumes `payment-processed`, reserves stock, publishes `inventory-reserved`
 5. `notification-service` operates independent listeners per terminal event:
    - `payment-processed` → "Your payment was successful."
@@ -166,11 +170,14 @@ Line items are stored as JSONB on the `orders` table. A separate `order_items` t
 TABLE payments
   id            UUID        PRIMARY KEY
   order_id      UUID        NOT NULL UNIQUE
-  status        VARCHAR     NOT NULL  -- SUCCESS | FAILED
+  transaction_id UUID       UNIQUE
+  customer_id   UUID        NOT NULL
+  status        VARCHAR     NOT NULL  -- RETRYING | SUCCESS | FAILED
+  attempts      INT         NOT NULL DEFAULT 1
   processed_at  TIMESTAMP   NOT NULL DEFAULT now()
 ```
 
-Redis stores idempotency keys to prevent duplicate payment processing on Kafka consumer redelivery.
+`RETRYING` is an in-flight status set when a payment attempt fails and a retry is queued. `SUCCESS` and `FAILED` are terminal states. Redis stores idempotency keys (`idempotency:payment:<orderId>`) to prevent duplicate processing on Kafka consumer redelivery. The idempotency check intentionally only short-circuits on terminal states — a `RETRYING` record must not block legitimate retries.
 
 ### inventory-service (`inventory_db`)
 
@@ -220,6 +227,7 @@ This starts:
 - PostgreSQL 17 — port `5432` — creates `orders_db`, `payments_db`, `inventory_db`
 - Redis — port `6379`
 - `order-service` — port `8080`
+- `payment-service` — no exposed port (Kafka consumer only)
 
 To bring everything down:
 
@@ -227,13 +235,13 @@ To bring everything down:
 docker compose -f infra/docker-compose.yml down
 ```
 
-To also wipe the PostgreSQL volume (clean slate):
+To also wipe the PostgreSQL and Redis volumes (clean slate):
 
 ```bash
 docker compose -f infra/docker-compose.yml down -v
 ```
 
-### Run order-service Locally (Against Containerised Infra)
+### Run a Service Locally Against Containerised Infra
 
 Start only the infrastructure:
 
@@ -244,10 +252,11 @@ docker compose -f infra/docker-compose.yml up kafka postgres redis -d
 Then run the service locally:
 
 ```bash
-./gradlew :order-service:bootRun -Dspring.profiles.active=local
+./gradlew :order-service:bootRun --no-daemon
+./gradlew :payment-service:bootRun --no-daemon
 ```
 
-The `local` profile connects to `localhost:29092` for Kafka and `localhost:5432` for PostgreSQL.
+The `local` profile is activated via the `bootRun` task configuration and connects to `localhost:29092` for Kafka, `localhost:5432` for PostgreSQL, and `localhost:6379` for Redis.
 
 ### Spring Profiles
 
@@ -287,10 +296,12 @@ JaCoCo enforces minimum coverage thresholds on every build:
 | Instruction | 90% |
 | Branch | 80% |
 
-Run tests with coverage verification:
+Unit and integration test exec files are merged before verification, giving a combined coverage figure. Run tests with coverage verification:
 
 ```bash
-./gradlew check
+./gradlew :order-service:test --no-daemon && \
+./gradlew :order-service:test -Dgroups=integration --no-daemon && \
+./gradlew :order-service:jacocoTestReport :order-service:jacocoCoverageVerification --no-daemon
 ```
 
 Coverage reports are generated at `build/reports/jacoco/` per module.
@@ -304,8 +315,8 @@ GitLab CI pipeline at `.gitlab-ci.yml`. Runs on every push to every branch.
 | Stage | Jobs | Runs on |
 |---|---|---|
 | `validate` | Spotless formatting check | All branches |
-| `test` | Unit tests and integration tests (parallel) | All branches |
-| `coverage` | JaCoCo verification, report published as artifact | All branches |
+| `test` | Unit tests (`shared`, `order-service`, `payment-service`) and integration tests (parallel) | All branches |
+| `coverage` | JaCoCo verification per module, reports published as artifacts | All branches |
 | `build` | Build Docker image, push to GitLab registry | `main` only |
 | `deploy` | Placeholder — Minikube/Helm (coming soon) | `main` only |
 
@@ -337,6 +348,8 @@ All services emit traces, metrics, and structured logs via OpenTelemetry:
 | Dual Kafka listeners | `kafka:9092` for container-to-container communication inside Docker; `localhost:29092` for host machine access during local development. Single listener would require different images per environment. |
 | Profile-agnostic Docker image | Spring profile is not baked into the Dockerfile. It is injected via `SPRING_PROFILES_ACTIVE` at the orchestration layer (Docker Compose env var, K8s pod spec). The same image runs in all environments. |
 | Multi-stage layered Dockerfile | Build stage compiles and extracts JAR layers; runtime stage uses `eclipse-temurin:21-jre-alpine`. Dependencies layer is cached separately from application code — fast rebuilds on code-only changes. |
+| Terminal-state idempotency | `payment-service` idempotency check only short-circuits on `SUCCESS` or `FAILED` status. A `RETRYING` record in the database must not block legitimate retry attempts — it is an in-flight state, not a terminal one. A naive `existsByOrderId` check would silently drop all retries. |
+| Kafka-native retry (no DLQ) | Payment retries are driven by publishing a `payment-retry` event back to Kafka with an `attempts` counter. This keeps retry logic explicit, observable, and testable without introducing a dead-letter queue or Spring Retry complexity at this stage. |
 
 ---
 
@@ -364,7 +377,9 @@ These are deliberate trade-offs made to ship a working implementation. Each is a
 - [x] `order-service` — multi-stage Dockerfile, added to Docker Compose
 - [x] Code quality — Spotless + ktlint
 - [x] GitLab CI pipeline — validate, test, coverage, build, deploy stages
-- [ ] `payment-service` — consumer, idempotency, producers
+- [x] `payment-service` — `order-placed` consumer, idempotency (Redis + DB terminal-state check), payment simulation, retry via `payment-retry` topic, `payment-processed` and `order-failed` producers
+- [x] `payment-service` — unit tests + integration tests (Testcontainers), JaCoCo coverage
+- [x] `payment-service` — multi-stage Dockerfile, added to Docker Compose, GitLab CI updated
 - [ ] `inventory-service` — consumer, reservation, producer
 - [ ] `notification-service` — listeners, mock dispatch
 - [ ] `analytics-service` — Kafka Streams topology

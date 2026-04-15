@@ -1,6 +1,4 @@
 spring:
-  profiles:
-    active: k8s
   datasource:
     url: jdbc:postgresql://postgres:5432/payments_db
     username: postgres

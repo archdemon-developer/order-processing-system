@@ -9,5 +9,6 @@ import java.util.UUID
 @Repository
 interface PaymentRepository : JpaRepository<Payment, UUID> {
     fun existsByOrderId(orderId: UUID): Boolean
+
     fun findByOrderId(orderId: UUID): Optional<Payment>
 }
