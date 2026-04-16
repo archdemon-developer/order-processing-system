@@ -413,8 +413,29 @@ class EventSerializerDeserializerTest {
         assertEquals(payload.totalPrice, result?.payload?.totalPrice)
         assertEquals(payload.attempts, result?.payload?.attempts)
         assertEquals(1, result?.payload?.items?.size)
-        assertEquals(productId, result?.payload?.items?.first()?.productId)
-        assertEquals(2, result?.payload?.items?.first()?.quantity)
-        assertEquals(BigDecimal("10.00"), result?.payload?.items?.first()?.pricePerItem)
+        assertEquals(
+            productId,
+            result
+                ?.payload
+                ?.items
+                ?.first()
+                ?.productId,
+        )
+        assertEquals(
+            2,
+            result
+                ?.payload
+                ?.items
+                ?.first()
+                ?.quantity,
+        )
+        assertEquals(
+            BigDecimal("10.00"),
+            result
+                ?.payload
+                ?.items
+                ?.first()
+                ?.pricePerItem,
+        )
     }
 }
