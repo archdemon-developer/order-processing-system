@@ -5,6 +5,7 @@ import com.orderprocessing.shared.events.InventoryReserved
 import com.orderprocessing.shared.events.OrderFailed
 import com.orderprocessing.shared.events.OrderPlaced
 import com.orderprocessing.shared.events.PaymentProcessed
+import com.orderprocessing.shared.events.PaymentRetry
 import com.orderprocessing.shared.model.OrderItem
 import com.orderprocessing.shared.serialization.EventDeserializer
 import com.orderprocessing.shared.serialization.EventSerializer
@@ -372,5 +373,48 @@ class EventSerializerDeserializerTest {
         assertEquals("OrderPlaced", result?.eventType)
         assertNotEquals("orderplaced", result?.eventType)
         assertNotEquals("ORDERPLACED", result?.eventType)
+    }
+
+    @Test
+    fun `should serialize and deserialize PaymentRetry envelope with full payload assertion`() {
+        val productId = UUID.randomUUID()
+        val payload =
+            PaymentRetry(
+                orderId = UUID.randomUUID(),
+                customerId = UUID.randomUUID(),
+                items =
+                    listOf(
+                        OrderItem(
+                            productId = productId,
+                            quantity = 2,
+                            pricePerItem = BigDecimal("10.00"),
+                        ),
+                    ),
+                totalPrice = BigDecimal("20.00"),
+                attempts = 2,
+            )
+        val envelope =
+            EventEnvelope(
+                eventId = UUID.randomUUID(),
+                eventType = "PaymentRetry",
+                occurredAt = Instant.now(),
+                payload = payload,
+            )
+
+        val deserializer = EventDeserializer(object : TypeReference<EventEnvelope<PaymentRetry>>() {})
+        val bytes = serializer.serialize(topic, envelope)
+        val result = deserializer.deserialize(topic, bytes)
+
+        assertEquals(envelope.eventId, result?.eventId)
+        assertEquals(envelope.eventType, result?.eventType)
+        assertEquals(envelope.occurredAt, result?.occurredAt)
+        assertEquals(payload.orderId, result?.payload?.orderId)
+        assertEquals(payload.customerId, result?.payload?.customerId)
+        assertEquals(payload.totalPrice, result?.payload?.totalPrice)
+        assertEquals(payload.attempts, result?.payload?.attempts)
+        assertEquals(1, result?.payload?.items?.size)
+        assertEquals(productId, result?.payload?.items?.first()?.productId)
+        assertEquals(2, result?.payload?.items?.first()?.quantity)
+        assertEquals(BigDecimal("10.00"), result?.payload?.items?.first()?.pricePerItem)
     }
 }
