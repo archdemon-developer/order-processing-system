@@ -10,13 +10,6 @@ variables:
   GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle"
   IMAGE_NAME: "$CI_REGISTRY_IMAGE/order-service"
 
-cache:
-  key: "$CI_COMMIT_REF_SLUG"
-  paths:
-    - .gradle/
-    - order-service/build/
-    - shared/build/
-
 # ─── VALIDATE ───────────────────────────────────────────────────────────────
 
 spotless:
@@ -44,7 +37,13 @@ unit-tests:
     expire_in: 7 days
   rules:
     - if: $CI_COMMIT_BRANCH
-
+  cache:
+    key: "unit-$CI_COMMIT_REF_SLUG"
+    paths:
+      - .gradle/
+      - shared/build/
+      - order-service/build/
+      - payment-service/build/
 integration-tests:
   stage: test
   image: docker:27
@@ -71,6 +70,13 @@ integration-tests:
     expire_in: 7 days
   rules:
     - if: $CI_COMMIT_BRANCH
+  cache:
+    key: "integration-$CI_COMMIT_REF_SLUG"
+    paths:
+      - .gradle/
+      - shared/build/
+      - order-service/build/
+      - payment-service/build/
 
 # ─── COVERAGE ────────────────────────────────────────────────────────────────
 
