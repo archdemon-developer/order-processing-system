@@ -14,6 +14,7 @@ import org.springframework.kafka.core.KafkaTemplate
 import org.springframework.stereotype.Service
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
 import kotlin.random.Random
 import kotlin.time.Duration.Companion.milliseconds
@@ -42,20 +43,27 @@ class PaymentService(
 
         val failedPayment = buildPayment(envelope.payload, PaymentStatus.RETRYING, null)
         paymentRepository.save(failedPayment)
-        kafkaTemplate.send(
-            "payment-retry",
-            failedPayment.orderId.toString(),
-            buildEnvelope(
+        try {
+            kafkaTemplate.send(
                 "payment-retry",
-                PaymentRetry(
-                    orderId = envelope.payload.orderId,
-                    customerId = envelope.payload.customerId,
-                    items = envelope.payload.items,
-                    totalPrice = envelope.payload.totalPrice,
-                    attempts = 1,
+                failedPayment.orderId.toString(),
+                buildEnvelope(
+                    "payment-retry",
+                    PaymentRetry(
+                        orderId = envelope.payload.orderId,
+                        customerId = envelope.payload.customerId,
+                        items = envelope.payload.items,
+                        totalPrice = envelope.payload.totalPrice,
+                        attempts = 1,
+                    ),
                 ),
-            ),
-        )
+            ).get()
+        } catch (e: ExecutionException) {
+            throw RuntimeException("Failed to publish payment retry event", e.cause)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw RuntimeException("Interrupted while publishing payment retry event", e)
+        }
     }
 
     fun processRetry(envelope: EventEnvelope<PaymentRetry>) {
@@ -69,18 +77,25 @@ class PaymentService(
         if (envelope.payload.attempts >= paymentProperties.retry.maxAttempts) {
             earlierPayment.status = PaymentStatus.FAILED
             paymentRepository.save(earlierPayment)
-            kafkaTemplate.send(
-                "order-failed",
-                earlierPayment.orderId.toString(),
-                buildEnvelope(
+            try {
+                kafkaTemplate.send(
                     "order-failed",
-                    OrderFailed(
-                        orderId = envelope.payload.orderId,
-                        customerId = envelope.payload.customerId,
-                        reason = "Order processing failed",
+                    earlierPayment.orderId.toString(),
+                    buildEnvelope(
+                        "order-failed",
+                        OrderFailed(
+                            orderId = envelope.payload.orderId,
+                            customerId = envelope.payload.customerId,
+                            reason = "Order processing failed",
+                        ),
                     ),
-                ),
-            )
+                ).get()
+            } catch (e: ExecutionException) {
+                throw RuntimeException("Failed to publish payment retry event", e.cause)
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+                throw RuntimeException("Interrupted while publishing payment retry event", e)
+            }
             return
         }
 
@@ -95,21 +110,28 @@ class PaymentService(
 
         earlierPayment.attempts = envelope.payload.attempts + 1
         paymentRepository.save(earlierPayment)
-        kafkaTemplate
-            .send(
-                "payment-retry",
-                earlierPayment.orderId.toString(),
-                buildEnvelope(
+        try {
+            kafkaTemplate
+                .send(
                     "payment-retry",
-                    PaymentRetry(
-                        orderId = envelope.payload.orderId,
-                        customerId = envelope.payload.customerId,
-                        items = envelope.payload.items,
-                        totalPrice = envelope.payload.totalPrice,
-                        attempts = envelope.payload.attempts + 1,
+                    earlierPayment.orderId.toString(),
+                    buildEnvelope(
+                        "payment-retry",
+                        PaymentRetry(
+                            orderId = envelope.payload.orderId,
+                            customerId = envelope.payload.customerId,
+                            items = envelope.payload.items,
+                            totalPrice = envelope.payload.totalPrice,
+                            attempts = envelope.payload.attempts + 1,
+                        ),
                     ),
-                ),
-            ).get()
+                ).get()
+        } catch (e: ExecutionException) {
+            throw RuntimeException("Failed to publish payment retry event", e.cause)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw RuntimeException("Interrupted while publishing payment retry event", e)
+        }
     }
 
     private fun handleSuccess(
@@ -122,18 +144,25 @@ class PaymentService(
         redisTemplate
             .opsForValue()
             .set("idempotency:payment:$orderId", "processed", 24, TimeUnit.HOURS)
-        kafkaTemplate.send(
-            "payment-processed",
-            payment.orderId.toString(),
-            buildEnvelope(
+        try {
+            kafkaTemplate.send(
                 "payment-processed",
-                PaymentProcessed(
-                    orderId = orderId,
-                    transactionId = UUID.randomUUID(),
-                    customerId = customerId,
+                payment.orderId.toString(),
+                buildEnvelope(
+                    "payment-processed",
+                    PaymentProcessed(
+                        orderId = orderId,
+                        transactionId = UUID.randomUUID(),
+                        customerId = customerId,
+                    ),
                 ),
-            ),
-        )
+            ).get()
+        } catch (e: ExecutionException) {
+            throw RuntimeException("Failed to publish payment retry event", e.cause)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw RuntimeException("Interrupted while publishing payment retry event", e)
+        }
     }
 
     private fun buildPayment(
