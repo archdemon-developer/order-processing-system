@@ -29,7 +29,7 @@ subprojects {
     }
 
     tasks.withType<JacocoReport> {
-        dependsOn(tasks.withType<Test>())
+        dependsOn(tasks.named("test"))
         reports {
             xml.required.set(true)
             html.required.set(true)
