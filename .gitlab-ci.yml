@@ -59,7 +59,7 @@ integration-tests:
     - apk add --no-cache openjdk21
     - export JAVA_HOME=$(dirname $(dirname $(readlink -f $(which java))))
   script:
-    - ./gradlew :order-service:test :payment-service:test --no-daemon -Dgroups=integration
+  - ./gradlew :order-service:integrationTest :payment-service:integrationTest --no-daemon
   artifacts:
     when: always
     reports:

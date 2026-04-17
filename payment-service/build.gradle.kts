@@ -24,18 +24,21 @@ configure<com.diffplug.gradle.spotless.SpotlessExtension> {
 
 tasks.test {
     useJUnitPlatform {
-        val groups = System.getProperty("groups")
-        if (groups != null) {
-            includeTags(groups)
-        } else {
-            excludeTags("integration")
-        }
+        excludeTags("integration")
     }
     extensions.configure(JacocoTaskExtension::class) {
-        val groups = System.getProperty("groups")
-        if (groups == "integration") {
-            destinationFile = file("${layout.buildDirectory.get()}/jacoco/integrationTest.exec")
-        }
+        destinationFile = file("${layout.buildDirectory.get()}/jacoco/test.exec")
+    }
+}
+
+val integrationTest by tasks.registering(Test::class) {
+    useJUnitPlatform {
+        includeTags("integration")
+    }
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    extensions.configure(JacocoTaskExtension::class) {
+        destinationFile = file("${layout.buildDirectory.get()}/jacoco/integrationTest.exec")
     }
 }
 
