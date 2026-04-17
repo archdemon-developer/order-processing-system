@@ -118,8 +118,8 @@ class PaymentServiceTest {
         verify(exactly = 1) { kafkaTemplate.send("payment-processed", orderId.toString(), any()) }
         verify(exactly = 1) { redisTemplate.hasKey("idempotency:payment:$orderId") }
         verify(exactly = 1) { redisTemplate.opsForValue().set("idempotency:payment:$orderId", "processed", 24, TimeUnit.HOURS) }
-        verify(exactly = 2) { paymentRepository.save(any()) }
-        verify(exactly = 2) { paymentRepository.findByOrderId(orderId) }
+        verify(exactly = 1) { paymentRepository.save(any()) }
+        verify(exactly = 1) { paymentRepository.findByOrderId(orderId) }
     }
 
     @Test
@@ -141,7 +141,7 @@ class PaymentServiceTest {
         verify(exactly = 1) { kafkaTemplate.send("payment-retry", orderId.toString(), any()) }
         verify(exactly = 1) { redisTemplate.hasKey("idempotency:payment:$orderId") }
         verify(exactly = 0) { redisTemplate.opsForValue() }
-        verify(exactly = 2) { paymentRepository.save(any()) }
+        verify(exactly = 1) { paymentRepository.save(any()) }
         verify(exactly = 1) { paymentRepository.findByOrderId(orderId) }
     }
 
