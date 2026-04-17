@@ -103,13 +103,14 @@ class PaymentServiceTest {
         val envelope = orderPlacedEnvelope()
         val orderId = envelope.payload.orderId
         val customerId = envelope.payload.customerId
-        val saved = paymentWithStatus(orderId, customerId, PaymentStatus.SUCCESS).also { it.transactionId = UUID.randomUUID() }
+        val pendingPayment = paymentWithStatus(orderId, customerId, PaymentStatus.PENDING)
+        val savedSuccess = paymentWithStatus(orderId, customerId, PaymentStatus.SUCCESS).also { it.transactionId = UUID.randomUUID() }
 
         every { redisTemplate.hasKey(any()) } returns false
-        every { paymentRepository.findByOrderId(any()) } returns paymentWithStatus(orderId, customerId, PaymentStatus.RETRYING)
+        every { paymentRepository.findByOrderId(orderId) } returns null andThen pendingPayment
         every { paymentProperties.failureRate } returns 0.0
         every { redisTemplate.opsForValue().set(any(), any(), any(), any()) } just Runs
-        every { paymentRepository.save(any()) } returns saved
+        every { paymentRepository.save(any()) } returnsMany listOf(pendingPayment, savedSuccess)
         every { kafkaTemplate.send(any(), any(), any()) } returns completedFuture()
 
         paymentService.processPayment(envelope)
@@ -117,8 +118,8 @@ class PaymentServiceTest {
         verify(exactly = 1) { kafkaTemplate.send("payment-processed", orderId.toString(), any()) }
         verify(exactly = 1) { redisTemplate.hasKey("idempotency:payment:$orderId") }
         verify(exactly = 1) { redisTemplate.opsForValue().set("idempotency:payment:$orderId", "processed", 24, TimeUnit.HOURS) }
-        verify(exactly = 1) { paymentRepository.save(any()) }
-        verify(exactly = 1) { paymentRepository.findByOrderId(orderId) }
+        verify(exactly = 2) { paymentRepository.save(any()) }
+        verify(exactly = 2) { paymentRepository.findByOrderId(orderId) }
     }
 
     @Test
@@ -126,12 +127,13 @@ class PaymentServiceTest {
         val envelope = orderPlacedEnvelope()
         val orderId = envelope.payload.orderId
         val customerId = envelope.payload.customerId
-        val saved = paymentWithStatus(orderId, customerId, PaymentStatus.RETRYING)
+        val pendingPayment = paymentWithStatus(orderId, customerId, PaymentStatus.PENDING)
+        val savedRetrying = paymentWithStatus(orderId, customerId, PaymentStatus.RETRYING)
 
         every { redisTemplate.hasKey(any()) } returns false
-        every { paymentRepository.findByOrderId(any()) } returns paymentWithStatus(orderId, customerId, PaymentStatus.RETRYING)
+        every { paymentRepository.findByOrderId(orderId) } returns null andThen pendingPayment
         every { paymentProperties.failureRate } returns 1.0
-        every { paymentRepository.save(any()) } returns saved
+        every { paymentRepository.save(any()) } returnsMany listOf(pendingPayment, savedRetrying)
         every { kafkaTemplate.send(any(), any(), any()) } returns completedFuture()
 
         paymentService.processPayment(envelope)
@@ -139,7 +141,7 @@ class PaymentServiceTest {
         verify(exactly = 1) { kafkaTemplate.send("payment-retry", orderId.toString(), any()) }
         verify(exactly = 1) { redisTemplate.hasKey("idempotency:payment:$orderId") }
         verify(exactly = 0) { redisTemplate.opsForValue() }
-        verify(exactly = 1) { paymentRepository.save(any()) }
+        verify(exactly = 2) { paymentRepository.save(any()) }
         verify(exactly = 1) { paymentRepository.findByOrderId(orderId) }
     }
 

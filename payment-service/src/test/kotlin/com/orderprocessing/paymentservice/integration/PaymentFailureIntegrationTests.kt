@@ -108,11 +108,11 @@ class PaymentFailureIntegrationTests {
             consumer.subscribe(listOf("payment-retry"))
             var retryCount = 0
             val deadline = System.currentTimeMillis() + 15_000
-            while (retryCount < 2 && System.currentTimeMillis() < deadline) {
+            while (retryCount < 3 && System.currentTimeMillis() < deadline) {
                 val records = consumer.poll(Duration.ofSeconds(3))
                 retryCount += records.count()
             }
-            assertEquals(2, retryCount)
+            assertEquals(3, retryCount)
         }
 
         createKafkaConsumer().use { consumer ->

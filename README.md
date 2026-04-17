@@ -383,7 +383,7 @@ These are deliberate trade-offs made to ship a working implementation. Each is a
 - [x] `payment-service` — unit tests + integration tests (Testcontainers), JaCoCo coverage
 - [x] `payment-service` — multi-stage Dockerfile, added to Docker Compose, GitLab CI updated
 - [x] Idiomatic Kotlin refactor — nullable types, enum semantics, Kotlin time, dead import removal
-- [ ] `integrationTest` Gradle task split (separate unit and integration test tasks)
+- [x] `integrationTest` Gradle task split (separate unit and integration test tasks)
 - [ ] `inventory-service` — consumer, reservation, producer
 - [ ] `notification-service` — listeners, mock dispatch
 - [ ] `analytics-service` — Kafka Streams topology
