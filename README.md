@@ -133,14 +133,14 @@ Swagger UI available at `http://localhost:8080/swagger-ui.html` when running loc
 
 ```json
 {
-  "customerId": "uuid",
-  "items": [
-    {
-      "productId": "uuid",
-      "quantity": 3,
-      "pricePerItem": 20.00
-    }
-  ]
+   "customerId": "uuid",
+   "items": [
+      {
+         "productId": "uuid",
+         "quantity": 3,
+         "pricePerItem": 20.00
+      }
+   ]
 }
 ```
 
@@ -154,7 +154,7 @@ Swagger UI available at `http://localhost:8080/swagger-ui.html` when running loc
 
 ```sql
 TABLE orders
-  id            UUID           PRIMARY KEY
+id            UUID           PRIMARY KEY
   customer_id   UUID           NOT NULL
   status        VARCHAR(50)    NOT NULL DEFAULT 'PENDING'
   items         JSONB          NOT NULL
@@ -168,7 +168,7 @@ Line items are stored as JSONB on the `orders` table. A separate `order_items` t
 
 ```sql
 TABLE payments
-  id            UUID        PRIMARY KEY
+id            UUID        PRIMARY KEY
   order_id      UUID        NOT NULL UNIQUE
   transaction_id UUID       UNIQUE
   customer_id   UUID        NOT NULL
@@ -183,7 +183,7 @@ TABLE payments
 
 ```sql
 TABLE inventory
-  id                  UUID  PRIMARY KEY
+id                  UUID  PRIMARY KEY
   product_id          UUID  NOT NULL UNIQUE
   quantity_available  INT   NOT NULL
 
@@ -348,8 +348,9 @@ All services emit traces, metrics, and structured logs via OpenTelemetry:
 | Dual Kafka listeners | `kafka:9092` for container-to-container communication inside Docker; `localhost:29092` for host machine access during local development. Single listener would require different images per environment. |
 | Profile-agnostic Docker image | Spring profile is not baked into the Dockerfile. It is injected via `SPRING_PROFILES_ACTIVE` at the orchestration layer (Docker Compose env var, K8s pod spec). The same image runs in all environments. |
 | Multi-stage layered Dockerfile | Build stage compiles and extracts JAR layers; runtime stage uses `eclipse-temurin:21-jre-alpine`. Dependencies layer is cached separately from application code — fast rebuilds on code-only changes. |
-| Terminal-state idempotency | `payment-service` idempotency check only short-circuits on `SUCCESS` or `FAILED` status. A `RETRYING` record in the database must not block legitimate retry attempts — it is an in-flight state, not a terminal one. A naive `existsByOrderId` check would silently drop all retries. |
+| Terminal-state idempotency | `payment-service` idempotency check only short-circuits on `SUCCESS` or `FAILED` status. A `RETRYING` record in the database must not block legitimate retry attempts — it is an in-flight state, not a terminal one. Terminal state knowledge lives on the `PaymentStatus` enum itself via an `isTerminal` property — the enum owns its own semantics. |
 | Kafka-native retry (no DLQ) | Payment retries are driven by publishing a `payment-retry` event back to Kafka with an `attempts` counter. This keeps retry logic explicit, observable, and testable without introducing a dead-letter queue or Spring Retry complexity at this stage. |
+| Idiomatic Kotlin throughout | The codebase uses Kotlin-native patterns: nullable types (`T?`) over `Optional<T>`, `status.name` over `status.toString()`, `isTerminal` enum properties, Kotlin `Duration` extensions for time, and `?: false` for nullable boolean guards. Java idioms are used only at unavoidable interop boundaries. |
 
 ---
 
@@ -364,6 +365,7 @@ These are deliberate trade-offs made to ship a working implementation. Each is a
 | Inventory reservation always succeeds | Stock quantity checking with `inventory` table, failure path via `order-failed` |
 | No authentication / authorisation | JWT via Spring Security |
 | Testcontainers reuse not enabled | Enable Testcontainers reuse to avoid container startup cost on repeated local test runs |
+| Blocking threading model (`Thread.sleep`, synchronous Kafka consumers) | Kotlin coroutines (`suspend` functions, `delay()`) with Spring's coroutine support — eliminates Java thread-blocking at the cost of a full-stack async architectural commitment |
 
 ---
 
@@ -380,6 +382,8 @@ These are deliberate trade-offs made to ship a working implementation. Each is a
 - [x] `payment-service` — `order-placed` consumer, idempotency (Redis + DB terminal-state check), payment simulation, retry via `payment-retry` topic, `payment-processed` and `order-failed` producers
 - [x] `payment-service` — unit tests + integration tests (Testcontainers), JaCoCo coverage
 - [x] `payment-service` — multi-stage Dockerfile, added to Docker Compose, GitLab CI updated
+- [x] Idiomatic Kotlin refactor — nullable types, enum semantics, Kotlin time, dead import removal
+- [ ] `integrationTest` Gradle task split (separate unit and integration test tasks)
 - [ ] `inventory-service` — consumer, reservation, producer
 - [ ] `notification-service` — listeners, mock dispatch
 - [ ] `analytics-service` — Kafka Streams topology

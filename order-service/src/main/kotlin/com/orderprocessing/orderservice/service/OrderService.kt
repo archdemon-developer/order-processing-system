@@ -60,7 +60,7 @@ class OrderService(
     private fun Order.toResponse() =
         CreateOrderResponse(
             orderId = id,
-            status = status.toString(),
+            status = status.name,
             totalPrice = totalPrice,
             createdAt = createdAt,
         )

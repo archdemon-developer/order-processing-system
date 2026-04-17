@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertNotNull
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection
@@ -32,6 +33,8 @@ import java.math.BigDecimal
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.toJavaDuration
 
 @Tag("integration")
 @Testcontainers
@@ -42,6 +45,8 @@ import java.util.UUID
 @DirtiesContext
 class PaymentSuccessIntegrationTests {
     companion object {
+        private const val KAFKA_LISTENER_STARTUP_WAIT_MS = 2000L
+
         @JvmStatic
         @Container
         @ServiceConnection
@@ -91,7 +96,7 @@ class PaymentSuccessIntegrationTests {
                 totalPrice = BigDecimal("20.00"),
             )
 
-        Thread.sleep(2000)
+        Thread.sleep(KAFKA_LISTENER_STARTUP_WAIT_MS.milliseconds.toJavaDuration())
         kafkaTemplate
             .send(
                 "order-placed",
@@ -114,8 +119,8 @@ class PaymentSuccessIntegrationTests {
         }
 
         val saved = paymentRepository.findByOrderId(orderPlaced.orderId)
-        assertTrue(saved.isPresent)
-        assertEquals(orderPlaced.customerId, saved.get().customerId)
+        assertNotNull(saved)
+        assertEquals(orderPlaced.customerId, saved.customerId)
         assertTrue(redisTemplate.hasKey("idempotency:payment:${orderPlaced.orderId}"))
     }
 

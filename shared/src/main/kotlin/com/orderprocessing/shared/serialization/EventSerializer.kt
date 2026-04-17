@@ -15,7 +15,7 @@ class EventSerializer<T> : Serializer<T> {
         topic: String,
         data: T,
     ): ByteArray? {
-        if (data == null) return null
-        return objectMapper.writeValueAsBytes(data)
+        val safeData = data ?: return null
+        return objectMapper.writeValueAsBytes(safeData)
     }
 }

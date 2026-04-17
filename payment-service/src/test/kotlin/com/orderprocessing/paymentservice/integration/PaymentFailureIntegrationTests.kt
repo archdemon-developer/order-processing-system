@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertNotNull
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection
@@ -124,9 +125,9 @@ class PaymentFailureIntegrationTests {
         }
 
         val saved = paymentRepository.findByOrderId(orderPlaced.orderId)
-        assertTrue(saved.isPresent)
-        assertEquals(orderPlaced.customerId, saved.get().customerId)
-        assertEquals(PaymentStatus.FAILED, saved.get().status)
+        assertNotNull(saved)
+        assertEquals(orderPlaced.customerId, saved.customerId)
+        assertEquals(PaymentStatus.FAILED, saved.status)
         assertFalse(redisTemplate.hasKey("idempotency:payment:${orderPlaced.orderId}"))
     }
 

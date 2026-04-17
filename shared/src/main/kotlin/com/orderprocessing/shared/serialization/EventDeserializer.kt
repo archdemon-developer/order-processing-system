@@ -18,7 +18,7 @@ class EventDeserializer<T>(
         topic: String,
         data: ByteArray?,
     ): T? {
-        if (data == null) return null
-        return objectMapper.readValue(data, typeReference)
+        val safeData = data ?: return null
+        return objectMapper.readValue(safeData, typeReference)
     }
 }

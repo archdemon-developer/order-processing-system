@@ -5,4 +5,7 @@ enum class PaymentStatus {
     SUCCESS,
     FAILED,
     PENDING,
+    ;
+
+    val isTerminal: Boolean get() = this == SUCCESS || this == FAILED
 }

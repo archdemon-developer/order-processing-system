@@ -90,7 +90,7 @@ class PaymentServiceTest {
         this.orderId = orderId
         this.customerId = customerId
         this.status = status
-        this.attempts = 1
+        attempts = 1
     }
 
     @Suppress("UNCHECKED_CAST")
@@ -106,7 +106,7 @@ class PaymentServiceTest {
         val saved = paymentWithStatus(orderId, customerId, PaymentStatus.SUCCESS).also { it.transactionId = UUID.randomUUID() }
 
         every { redisTemplate.hasKey(any()) } returns false
-        every { paymentRepository.findByOrderId(any()) } returns Optional.of(paymentWithStatus(orderId, customerId, PaymentStatus.RETRYING))
+        every { paymentRepository.findByOrderId(any()) } returns paymentWithStatus(orderId, customerId, PaymentStatus.RETRYING)
         every { paymentProperties.failureRate } returns 0.0
         every { redisTemplate.opsForValue().set(any(), any(), any(), any()) } just Runs
         every { paymentRepository.save(any()) } returns saved
@@ -129,7 +129,7 @@ class PaymentServiceTest {
         val saved = paymentWithStatus(orderId, customerId, PaymentStatus.RETRYING)
 
         every { redisTemplate.hasKey(any()) } returns false
-        every { paymentRepository.findByOrderId(any()) } returns Optional.of(paymentWithStatus(orderId, customerId, PaymentStatus.RETRYING))
+        every { paymentRepository.findByOrderId(any()) } returns paymentWithStatus(orderId, customerId, PaymentStatus.RETRYING)
         every { paymentProperties.failureRate } returns 1.0
         every { paymentRepository.save(any()) } returns saved
         every { kafkaTemplate.send(any(), any(), any()) } returns completedFuture()
@@ -166,7 +166,7 @@ class PaymentServiceTest {
         val customerId = envelope.payload.customerId
 
         every { redisTemplate.hasKey(any()) } returns false
-        every { paymentRepository.findByOrderId(any()) } returns Optional.of(paymentWithStatus(orderId, customerId, PaymentStatus.SUCCESS))
+        every { paymentRepository.findByOrderId(any()) } returns paymentWithStatus(orderId, customerId, PaymentStatus.SUCCESS)
 
         paymentService.processPayment(envelope)
 
@@ -186,7 +186,7 @@ class PaymentServiceTest {
         val saved = paymentWithStatus(orderId, customerId, PaymentStatus.SUCCESS).also { it.transactionId = UUID.randomUUID() }
 
         every { redisTemplate.hasKey(any()) } returns false
-        every { paymentRepository.findByOrderId(any()) } returns Optional.of(existing)
+        every { paymentRepository.findByOrderId(any()) } returns existing
         every { paymentProperties.failureRate } returns 0.0
         every { paymentProperties.retry.maxAttempts } returns 3
         every { paymentProperties.retry.delayMs } returns 0
@@ -211,7 +211,7 @@ class PaymentServiceTest {
         val existing = paymentWithStatus(orderId, customerId, PaymentStatus.RETRYING)
 
         every { redisTemplate.hasKey(any()) } returns false
-        every { paymentRepository.findByOrderId(any()) } returns Optional.of(existing)
+        every { paymentRepository.findByOrderId(any()) } returns existing
         every { paymentProperties.failureRate } returns 1.0
         every { paymentProperties.retry.maxAttempts } returns 3
         every { paymentProperties.retry.delayMs } returns 0
@@ -235,7 +235,7 @@ class PaymentServiceTest {
         val existing = paymentWithStatus(orderId, customerId, PaymentStatus.RETRYING)
 
         every { redisTemplate.hasKey(any()) } returns false
-        every { paymentRepository.findByOrderId(any()) } returns Optional.of(existing)
+        every { paymentRepository.findByOrderId(any()) } returns existing
         every { paymentProperties.retry.maxAttempts } returns 3
         every { paymentRepository.save(any()) } returns existing
         every { kafkaTemplate.send(any(), any(), any()) } returns completedFuture()
