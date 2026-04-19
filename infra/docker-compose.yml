@@ -59,5 +59,16 @@ services:
       - kafka
       - postgres
       - redis
+
+  notification-service:
+    build:
+      context: ../
+      dockerfile: notification-service/Dockerfile
+    container_name: notification-service
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    depends_on:
+      - kafka
+
 volumes:
   postgres_data:

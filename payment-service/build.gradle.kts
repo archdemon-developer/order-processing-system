@@ -84,6 +84,5 @@ dependencies {
     testImplementation("org.testcontainers:testcontainers-junit-jupiter")
     testImplementation("org.testcontainers:testcontainers-postgresql")
     testImplementation("org.testcontainers:testcontainers-kafka")
-    testImplementation("org.springframework.kafka:spring-kafka-test")
     testImplementation("com.redis:testcontainers-redis")
 }

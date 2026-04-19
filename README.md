@@ -12,12 +12,12 @@ Only `order-service` exposes a public REST API. All other services are purely ev
 Client → order-service (REST)
            ↓ order-placed
        payment-service
-           ↓ payment-processed         ↓ order-failed
-       inventory-service           notification-service
-           ↓ inventory-reserved
-       notification-service
+           ↓ payment-processed       ↓ order-failed
+       notification-service       notification-service
        analytics-service
 ```
+
+`inventory-service` is deferred to a standalone follow-on project. It will integrate with this system when built.
 
 ---
 
@@ -27,9 +27,9 @@ Client → order-service (REST)
 |---|---|
 | `order-service` | Accepts orders via REST, publishes `order-placed` event |
 | `payment-service` | Consumes `order-placed`, simulates payment with retry, publishes `payment-processed` or `order-failed` |
-| `inventory-service` | Consumes `payment-processed`, reserves stock, publishes `inventory-reserved` |
-| `notification-service` | Consumes terminal events, sends mock notifications |
-| `analytics-service` | Kafka Streams consumer, real-time aggregations |
+| `notification-service` | Consumes `payment-processed` and `order-failed`, sends mock notifications |
+| `analytics-service` | Kafka Streams consumer, real-time aggregations (coming soon) |
+| `inventory-service` | Deferred — standalone follow-on project |
 
 ---
 
@@ -76,12 +76,15 @@ order-processing-system/
 ├── payment-service/
 │   ├── Dockerfile
 │   └── src/
-├── inventory-service/
 ├── notification-service/
+│   ├── Dockerfile
+│   └── src/
 ├── analytics-service/
+├── inventory-service/              # Deferred — standalone follow-on project
 ├── infra/
 │   ├── docker-compose.yml
 │   └── postgres/init.sql
+├── .dockerignore
 ├── .gitlab-ci.yml
 ├── build.gradle.kts                # Root build — plugins, JaCoCo, Spotless
 └── settings.gradle.kts
@@ -95,9 +98,9 @@ order-processing-system/
 |---|---|---|
 | `order-placed` | `order-service` | `payment-service`, `analytics-service` |
 | `payment-retry` | `payment-service` | `payment-service` |
-| `payment-processed` | `payment-service` | `inventory-service`, `notification-service` |
+| `payment-processed` | `payment-service` | `notification-service` |
 | `order-failed` | `payment-service` | `notification-service` |
-| `inventory-reserved` | `inventory-service` | `notification-service`, `analytics-service` |
+| `inventory-reserved` | `inventory-service` (deferred) | `notification-service`, `analytics-service` |
 
 **Naming convention:** kebab-case throughout. Consistent, readable, no collision with Kotlin package naming.
 
@@ -110,12 +113,10 @@ order-processing-system/
 3. `payment-service` consumes `order-placed`:
    - Success → publishes `payment-processed`
    - Failure → publishes `payment-retry` (up to `max-attempts`), then `order-failed` on exhaustion
-4. `inventory-service` consumes `payment-processed`, reserves stock, publishes `inventory-reserved`
-5. `notification-service` operates independent listeners per terminal event:
+4. `notification-service` operates independent listeners per terminal event:
    - `payment-processed` → "Your payment was successful."
    - `order-failed` → "Your order could not be processed."
-   - `inventory-reserved` → "Your order is confirmed."
-6. `analytics-service` consumes `order-placed` and `inventory-reserved` for real-time aggregations
+5. `analytics-service` consumes `order-placed` for real-time aggregations (coming soon)
 
 ---
 
@@ -154,7 +155,7 @@ Swagger UI available at `http://localhost:8080/swagger-ui.html` when running loc
 
 ```sql
 TABLE orders
-id            UUID           PRIMARY KEY
+  id            UUID           PRIMARY KEY
   customer_id   UUID           NOT NULL
   status        VARCHAR(50)    NOT NULL DEFAULT 'PENDING'
   items         JSONB          NOT NULL
@@ -168,36 +169,19 @@ Line items are stored as JSONB on the `orders` table. A separate `order_items` t
 
 ```sql
 TABLE payments
-id            UUID        PRIMARY KEY
-  order_id      UUID        NOT NULL UNIQUE
-  transaction_id UUID       UNIQUE
-  customer_id   UUID        NOT NULL
-  status        VARCHAR     NOT NULL  -- RETRYING | SUCCESS | FAILED
-  attempts      INT         NOT NULL DEFAULT 1
-  processed_at  TIMESTAMP   NOT NULL DEFAULT now()
+  id             UUID        PRIMARY KEY
+  order_id       UUID        NOT NULL UNIQUE
+  transaction_id UUID        UNIQUE
+  customer_id    UUID        NOT NULL
+  status         VARCHAR     NOT NULL  -- RETRYING | SUCCESS | FAILED
+  attempts       INT         NOT NULL DEFAULT 1
+  processed_at   TIMESTAMP   NOT NULL DEFAULT now()
 ```
 
 `RETRYING` is an in-flight status set when a payment attempt fails and a retry is queued. `SUCCESS` and `FAILED` are terminal states. Redis stores idempotency keys (`idempotency:payment:<orderId>`) to prevent duplicate processing on Kafka consumer redelivery. The idempotency check intentionally only short-circuits on terminal states — a `RETRYING` record must not block legitimate retries.
 
-### inventory-service (`inventory_db`)
-
-```sql
-TABLE inventory
-id                  UUID  PRIMARY KEY
-  product_id          UUID  NOT NULL UNIQUE
-  quantity_available  INT   NOT NULL
-
-TABLE inventory_reservations
-  id                UUID        PRIMARY KEY
-  order_id          UUID        NOT NULL UNIQUE
-  product_id        UUID        NOT NULL
-  quantity_reserved INT         NOT NULL
-  status            VARCHAR     NOT NULL  -- RESERVED | FAILED
-  reserved_at       TIMESTAMP   NOT NULL DEFAULT now()
-```
-
 ### notification-service
-No database. All notifications are mock (logged to stdout).
+No database. All notifications are mock (logged to stdout via `println`). Structured logging will be introduced when observability is wired up.
 
 ### analytics-service
 No relational database. State maintained in Kafka Streams state stores (RocksDB-backed). Aggregations tracked:
@@ -224,10 +208,11 @@ docker compose -f infra/docker-compose.yml up --build -d
 
 This starts:
 - Kafka (KRaft mode) — ports `9092` (container-to-container), `29092` (host access)
-- PostgreSQL 17 — port `5432` — creates `orders_db`, `payments_db`, `inventory_db`
+- PostgreSQL 17 — port `5432` — creates `orders_db`, `payments_db`
 - Redis — port `6379`
 - `order-service` — port `8080`
 - `payment-service` — no exposed port (Kafka consumer only)
+- `notification-service` — no exposed port (Kafka consumer only)
 
 To bring everything down:
 
@@ -254,6 +239,7 @@ Then run the service locally:
 ```bash
 ./gradlew :order-service:bootRun --no-daemon
 ./gradlew :payment-service:bootRun --no-daemon
+./gradlew :notification-service:bootRun --no-daemon
 ```
 
 The `local` profile is activated via the `bootRun` task configuration and connects to `localhost:29092` for Kafka, `localhost:5432` for PostgreSQL, and `localhost:6379` for Redis.
@@ -299,9 +285,9 @@ JaCoCo enforces minimum coverage thresholds on every build:
 Unit and integration test exec files are merged before verification, giving a combined coverage figure. Run tests with coverage verification:
 
 ```bash
-./gradlew :order-service:test --no-daemon && \
-./gradlew :order-service:test -Dgroups=integration --no-daemon && \
-./gradlew :order-service:jacocoTestReport :order-service:jacocoCoverageVerification --no-daemon
+./gradlew :order-service:test :order-service:integrationTest :order-service:jacocoTestReport :order-service:jacocoCoverageVerification --no-daemon
+./gradlew :payment-service:test :payment-service:integrationTest :payment-service:jacocoTestReport :payment-service:jacocoCoverageVerification --no-daemon
+./gradlew :notification-service:test :notification-service:integrationTest :notification-service:jacocoTestReport :notification-service:jacocoCoverageVerification --no-daemon
 ```
 
 Coverage reports are generated at `build/reports/jacoco/` per module.
@@ -315,12 +301,12 @@ GitLab CI pipeline at `.gitlab-ci.yml`. Runs on every push to every branch.
 | Stage | Jobs | Runs on |
 |---|---|---|
 | `validate` | Spotless formatting check | All branches |
-| `test` | Unit tests (`shared`, `order-service`, `payment-service`) and integration tests (parallel) | All branches |
+| `test` | Unit tests (`shared`, `order-service`, `payment-service`, `notification-service`) and integration tests (parallel) | All branches |
 | `coverage` | JaCoCo verification per module, reports published as artifacts | All branches |
-| `build` | Build Docker image, push to GitLab registry | `main` only |
+| `build` | Build and push Docker image per service (`order-service`, `payment-service`, `notification-service`) | `main` only |
 | `deploy` | Placeholder — Minikube/Helm (coming soon) | `main` only |
 
-Docker images are tagged with both the commit SHA (`order-service:abc1234`) and `latest`.
+Docker images are tagged with both the commit SHA (e.g. `order-service:abc1234`) and `latest`.
 
 ---
 
@@ -343,14 +329,16 @@ All services emit traces, metrics, and structured logs via OpenTelemetry:
 | Explicit `order-failed` event | Avoids a `payment-processed` event with a `FAILED` status field, which creates ambiguous consumer contracts. |
 | `PENDING` status only (initial) | Order status lifecycle (`PENDING → CONFIRMED → FAILED`) will expand as downstream services are built. |
 | Flyway owns the schema | `hibernate.ddl-auto=validate`. Hibernate validates against the schema, never modifies it. |
-| Single PostgreSQL container (local) | Three logical databases on one container for local resource efficiency. Production would use isolated instances per service. |
+| Single PostgreSQL container (local) | Two logical databases on one container for local resource efficiency. Production would use isolated instances per service. |
 | KRaft mode (no ZooKeeper) | Confluent Platform 8.0 removed ZooKeeper. Single Kafka container with `KAFKA_PROCESS_ROLES: broker,controller`. |
 | Dual Kafka listeners | `kafka:9092` for container-to-container communication inside Docker; `localhost:29092` for host machine access during local development. Single listener would require different images per environment. |
 | Profile-agnostic Docker image | Spring profile is not baked into the Dockerfile. It is injected via `SPRING_PROFILES_ACTIVE` at the orchestration layer (Docker Compose env var, K8s pod spec). The same image runs in all environments. |
 | Multi-stage layered Dockerfile | Build stage compiles and extracts JAR layers; runtime stage uses `eclipse-temurin:21-jre-alpine`. Dependencies layer is cached separately from application code — fast rebuilds on code-only changes. |
 | Terminal-state idempotency | `payment-service` idempotency check only short-circuits on `SUCCESS` or `FAILED` status. A `RETRYING` record in the database must not block legitimate retry attempts — it is an in-flight state, not a terminal one. Terminal state knowledge lives on the `PaymentStatus` enum itself via an `isTerminal` property — the enum owns its own semantics. |
 | Kafka-native retry (no DLQ) | Payment retries are driven by publishing a `payment-retry` event back to Kafka with an `attempts` counter. This keeps retry logic explicit, observable, and testable without introducing a dead-letter queue or Spring Retry complexity at this stage. |
+| Separate `@KafkaListener` per event type | `notification-service` uses one consumer per topic with its own container factory and `TypeReference`. No shared listener with conditional branching — clean, independently testable handlers. |
 | Idiomatic Kotlin throughout | The codebase uses Kotlin-native patterns: nullable types (`T?`) over `Optional<T>`, `status.name` over `status.toString()`, `isTerminal` enum properties, Kotlin `Duration` extensions for time, and `?: false` for nullable boolean guards. Java idioms are used only at unavoidable interop boundaries. |
+| `inventory-service` deferred | Stock management, reservation lifecycle, and contention handling warrant their own focused project. This system treats `payment-processed` as the terminal success event for now. |
 
 ---
 
@@ -362,7 +350,7 @@ These are deliberate trade-offs made to ship a working implementation. Each is a
 |---|---|
 | Kafka publish failure triggers DB rollback via `.get()` | Transactional Outbox Pattern — persist events to a DB outbox table in the same transaction, relay to Kafka asynchronously |
 | Payment is a simulation, not a live gateway | Stripe / Adyen sandbox integration |
-| Inventory reservation always succeeds | Stock quantity checking with `inventory` table, failure path via `order-failed` |
+| `notification-service` logs to stdout via `println` | Structured logging via SLF4J with OpenTelemetry log correlation |
 | No authentication / authorisation | JWT via Spring Security |
 | Testcontainers reuse not enabled | Enable Testcontainers reuse to avoid container startup cost on repeated local test runs |
 | Blocking threading model (`Thread.sleep`, synchronous Kafka consumers) | Kotlin coroutines (`suspend` functions, `delay()`) with Spring's coroutine support — eliminates Java thread-blocking at the cost of a full-stack async architectural commitment |
@@ -384,8 +372,8 @@ These are deliberate trade-offs made to ship a working implementation. Each is a
 - [x] `payment-service` — multi-stage Dockerfile, added to Docker Compose, GitLab CI updated
 - [x] Idiomatic Kotlin refactor — nullable types, enum semantics, Kotlin time, dead import removal
 - [x] `integrationTest` Gradle task split (separate unit and integration test tasks)
-- [ ] `inventory-service` — consumer, reservation, producer
-- [ ] `notification-service` — listeners, mock dispatch
+- [x] `notification-service` — `payment-processed` and `order-failed` consumers, mock notifications, integration tests (CountDownLatch), Dockerfile, Docker Compose, GitLab CI updated
+- [x] `inventory-service` deferred — will be built as a standalone follow-on project
 - [ ] `analytics-service` — Kafka Streams topology
 - [ ] Observability — OpenTelemetry, Grafana dashboards
 - [ ] Kubernetes + Helm — Minikube manifests, Helm chart per service
