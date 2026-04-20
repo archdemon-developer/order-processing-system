@@ -62,7 +62,7 @@ class PaymentFailureIntegrationTests {
             registry.add("kafka.bootstrap-servers") { kafka.bootstrapServers }
             registry.add("payment.failure-rate") { 1.0 }
             registry.add("payment.retry.max-attempts") { 3 }
-            registry.add("payment.retry.delay-ms") { 500 }
+            registry.add("payment.retry.delay-ms") { Duration.ofMillis(500L) }
             registry.add("spring.data.redis.host") { redis.host }
             registry.add("spring.data.redis.port") { redis.firstMappedPort }
         }

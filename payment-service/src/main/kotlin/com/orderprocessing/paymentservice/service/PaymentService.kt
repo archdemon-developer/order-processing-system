@@ -33,11 +33,8 @@ class PaymentService(
         }
 
         if (simulatePayment()) {
-            handleSuccess(
-                envelope.payload.orderId,
-                envelope.payload.customerId,
-                buildPayment(envelope.payload, PaymentStatus.SUCCESS, UUID.randomUUID()),
-            )
+            val successPayment = buildPayment(envelope.payload, PaymentStatus.SUCCESS, UUID.randomUUID())
+            handleSuccess(successPayment)
             return
         }
 
@@ -104,7 +101,9 @@ class PaymentService(
                 .toJavaDuration(),
         )
         if (simulatePayment()) {
-            handleSuccess(envelope.payload.orderId, customerId = envelope.payload.customerId, earlierPayment)
+            earlierPayment.status = PaymentStatus.SUCCESS
+            earlierPayment.transactionId = UUID.randomUUID()
+            handleSuccess(earlierPayment)
             return
         }
 
@@ -135,15 +134,13 @@ class PaymentService(
     }
 
     private fun handleSuccess(
-        orderId: UUID,
-        customerId: UUID,
         payment: Payment,
     ) {
         paymentRepository.save(payment)
 
         redisTemplate
             .opsForValue()
-            .set("idempotency:payment:$orderId", "processed", 24, TimeUnit.HOURS)
+            .set("idempotency:payment:$payment.orderId", "processed", 24, TimeUnit.HOURS)
         try {
             kafkaTemplate.send(
                 "payment-processed",
@@ -151,9 +148,9 @@ class PaymentService(
                 buildEnvelope(
                     "payment-processed",
                     PaymentProcessed(
-                        orderId = orderId,
-                        transactionId = UUID.randomUUID(),
-                        customerId = customerId,
+                        orderId = payment.orderId,
+                        transactionId = payment.transactionId!!,
+                        customerId = payment.customerId,
                     ),
                 ),
             ).get()

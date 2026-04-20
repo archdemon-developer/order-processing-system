@@ -16,9 +16,15 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   postgres:
     image: postgres:17-alpine
+    command: postgres -c wal_level=logical
     container_name: postgres
     ports:
       - "5432:5432"
@@ -28,12 +34,73 @@ services:
     volumes:
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:8.6.1-alpine
     container_name: redis
     ports:
       - "6379:6379"
+
+  kafka-connect-1:
+    build:
+      context: ./kafka-connect
+    container_name: kafka-connect-1
+    ports:
+      - "8083:8083"
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: kafka:9092
+      CONNECT_REST_PORT: 8083
+      CONNECT_REST_ADVERTISED_HOST_NAME: kafka-connect-1
+      CONNECT_GROUP_ID: kafka-connect-cluster
+      CONNECT_CONFIG_STORAGE_TOPIC: connect-configs
+      CONNECT_OFFSET_STORAGE_TOPIC: connect-offsets
+      CONNECT_STATUS_STORAGE_TOPIC: connect-status
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+      CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+      CONNECT_CONFIG_PROVIDERS: file
+      CONNECT_CONFIG_PROVIDERS_FILE_CLASS: org.apache.kafka.common.config.provider.FileConfigProvider
+    volumes:
+      - ./kafka-connect/connect-secrets.properties:/etc/kafka-connect/secrets/connect-secrets.properties
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/connectors"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  kafka-topic-init:
+    image: confluentinc/cp-kafka:8.0.0
+    container_name: kafka-topic-init
+    volumes:
+      - ./kafka-connect/init-topics.sh:/init-topics.sh
+      - ./kafka-connect/topics.conf:/topics.conf
+    entrypoint: ["bash", "/init-topics.sh"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  connect-init:
+    image: curlimages/curl:8.11.1
+    container_name: connect-init
+    volumes:
+      - ./kafka-connect/register-connectors.sh:/register-connectors.sh
+    entrypoint: ["sh", "/register-connectors.sh"]
+    depends_on:
+      kafka-connect-1:
+        condition: service_healthy
 
   order-service:
     build:
@@ -45,8 +112,10 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: docker
     depends_on:
-      - kafka
-      - postgres
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
 
   payment-service:
     build:
@@ -56,9 +125,12 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: docker
     depends_on:
-      - kafka
-      - postgres
-      - redis
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
 
   notification-service:
     build:
@@ -68,7 +140,8 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: docker
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
 
 volumes:
   postgres_data:
