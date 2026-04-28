@@ -45,4 +45,4 @@ bin/
 .DS_Store
 
 ### custom ###
-infra/kafka-connect/connect-secret.properties
+infra/kafka-connect/connect-secrets.properties

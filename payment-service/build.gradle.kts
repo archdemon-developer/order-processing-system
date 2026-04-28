@@ -43,6 +43,7 @@ val integrationTest by tasks.registering(Test::class) {
 }
 
 tasks.jacocoTestReport {
+    dependsOn(tasks.test, integrationTest)
     executionData.setFrom(
         fileTree(layout.buildDirectory.get()) {
             include("jacoco/*.exec")
@@ -65,6 +66,7 @@ tasks.withType<JacocoCoverageVerification> {
 dependencies {
     implementation(platform(SpringBootPlugin.BOM_COORDINATES))
     implementation("tools.jackson.module:jackson-module-kotlin")
+    implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.springframework.boot:spring-boot-starter-data-redis")
@@ -79,7 +81,7 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testImplementation("io.mockk:mockk:1.14.9")
     testImplementation("com.ninja-squad:springmockk:5.0.1")
-
+    testImplementation("org.awaitility:awaitility:4.2.2")
     testImplementation(platform("org.testcontainers:testcontainers-bom:2.0.4"))
     testImplementation("org.testcontainers:testcontainers-junit-jupiter")
     testImplementation("org.testcontainers:testcontainers-postgresql")

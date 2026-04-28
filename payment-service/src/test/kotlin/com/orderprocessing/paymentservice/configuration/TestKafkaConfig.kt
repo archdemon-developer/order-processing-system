@@ -1,23 +1,22 @@
-package com.orderprocessing.orderservice.configuration
+package com.orderprocessing.paymentservice.configuration
 
 import com.orderprocessing.shared.envelope.EventEnvelope
-import com.orderprocessing.shared.events.OrderPlaced
 import com.orderprocessing.shared.serialization.EventSerializer
 import org.apache.kafka.clients.producer.ProducerConfig
 import org.apache.kafka.common.serialization.StringSerializer
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Configuration
 import org.springframework.kafka.core.DefaultKafkaProducerFactory
 import org.springframework.kafka.core.KafkaTemplate
 import org.springframework.kafka.core.ProducerFactory
 
-@Configuration
-class KafkaConfig(
-    @param:Value($$"${kafka.bootstrap-servers}") private val bootstrapServers: String,
+@TestConfiguration
+class TestKafkaConfig(
+    @param:Value("\${kafka.bootstrap-servers}") private val bootstrapServers: String,
 ) {
     @Bean
-    fun producerFactory(): ProducerFactory<String, EventEnvelope<OrderPlaced>> {
+    fun testProducerFactory(): ProducerFactory<String, EventEnvelope<*>> {
         val config =
             mapOf(
                 ProducerConfig.BOOTSTRAP_SERVERS_CONFIG to bootstrapServers,
@@ -28,5 +27,5 @@ class KafkaConfig(
     }
 
     @Bean
-    fun kafkaTemplate(): KafkaTemplate<String, EventEnvelope<OrderPlaced>> = KafkaTemplate(producerFactory())
+    fun testKafkaTemplate(): KafkaTemplate<String, EventEnvelope<*>> = KafkaTemplate(testProducerFactory())
 }

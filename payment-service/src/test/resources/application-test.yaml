@@ -15,8 +15,17 @@ spring:
 kafka:
   bootstrap-servers: localhost:9092
 
+outbox:
+  retention-hours: 24
+  cleanup-interval-ms: 3600000
+
 logging:
   level:
     org.flywaydb: DEBUG
     org.springframework.kafka: DEBUG
     com.orderprocessing: DEBUG
+
+connect:
+  url: http://localhost:8083
+  connector-names:
+    - debezium-orders-outbox

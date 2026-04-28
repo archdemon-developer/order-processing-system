@@ -16,15 +16,16 @@ class TestKafkaConfig(
     @param:Value("\${kafka.bootstrap-servers}") private val bootstrapServers: String,
 ) {
     @Bean
-    fun producerFactory(): ProducerFactory<String, EventEnvelope<*>> {
-        val config = mapOf(
-            ProducerConfig.BOOTSTRAP_SERVERS_CONFIG to bootstrapServers,
-            ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG to StringSerializer::class.java,
-            ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG to EventSerializer::class.java,
-        )
+    fun testProducerFactory(): ProducerFactory<String, EventEnvelope<*>> {
+        val config =
+            mapOf(
+                ProducerConfig.BOOTSTRAP_SERVERS_CONFIG to bootstrapServers,
+                ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG to StringSerializer::class.java,
+                ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG to EventSerializer::class.java,
+            )
         return DefaultKafkaProducerFactory(config)
     }
 
     @Bean
-    fun kafkaTemplate(): KafkaTemplate<String, EventEnvelope<*>> = KafkaTemplate(producerFactory())
+    fun testKafkaTemplate(): KafkaTemplate<String, EventEnvelope<*>> = KafkaTemplate(testProducerFactory())
 }

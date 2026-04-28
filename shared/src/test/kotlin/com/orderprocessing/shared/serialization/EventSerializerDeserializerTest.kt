@@ -1,4 +1,4 @@
-package serialization
+package com.orderprocessing.shared.serialization
 
 import com.orderprocessing.shared.envelope.EventEnvelope
 import com.orderprocessing.shared.events.InventoryReserved

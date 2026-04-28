@@ -9,6 +9,7 @@ import com.orderprocessing.shared.events.OrderPlaced
 import com.orderprocessing.shared.events.PaymentProcessed
 import com.orderprocessing.shared.events.PaymentRetry
 import com.orderprocessing.shared.model.OrderItem
+import com.orderprocessing.shared.outbox.OutboxEventRepository
 import io.mockk.Runs
 import io.mockk.every
 import io.mockk.impl.annotations.MockK
@@ -23,6 +24,7 @@ import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.data.redis.core.RedisTemplate
 import org.springframework.kafka.core.KafkaTemplate
 import org.springframework.kafka.support.SendResult
+import tools.jackson.databind.json.JsonMapper
 import java.math.BigDecimal
 import java.time.Instant
 import java.util.Optional
@@ -33,19 +35,21 @@ import java.util.concurrent.TimeUnit
 @Tag("unit")
 @ExtendWith(MockKExtension::class)
 class PaymentServiceTest {
-    @MockK lateinit var kafkaTemplate: KafkaTemplate<String, EventEnvelope<*>>
-
     @MockK lateinit var redisTemplate: RedisTemplate<String, String>
 
     @MockK lateinit var paymentProperties: PaymentProperties
 
     @MockK lateinit var paymentRepository: PaymentRepository
 
+    @MockK lateinit var outboxEventRepository: OutboxEventRepository
+
+    @MockK lateinit var objectMapper: JsonMapper
+
     private lateinit var paymentService: PaymentService
 
     @BeforeEach
     fun setUp() {
-        paymentService = PaymentService(paymentProperties, paymentRepository, kafkaTemplate, redisTemplate)
+        paymentService = PaymentService(paymentProperties, paymentRepository, outboxEventRepository, objectMapper, redisTemplate)
     }
 
     private fun orderPlacedEnvelope(
@@ -93,11 +97,6 @@ class PaymentServiceTest {
         attempts = 1
     }
 
-    @Suppress("UNCHECKED_CAST")
-    private fun completedFuture() =
-        CompletableFuture.completedFuture(mockk<SendResult<String, EventEnvelope<PaymentProcessed>>>())
-            as CompletableFuture<SendResult<String, EventEnvelope<*>>>
-
     @Test
     fun `processPayment - happy path - saves payment and publishes payment-processed event`() {
         val envelope = orderPlacedEnvelope()
@@ -111,11 +110,12 @@ class PaymentServiceTest {
         every { paymentProperties.failureRate } returns 0.0
         every { redisTemplate.opsForValue().set(any(), any(), any(), any()) } just Runs
         every { paymentRepository.save(any()) } returnsMany listOf(pendingPayment, savedSuccess)
-        every { kafkaTemplate.send(any(), any(), any()) } returns completedFuture()
+        every { outboxEventRepository.save(any()) } returns mockk()
+        every { objectMapper.writeValueAsString(any()) } returns "{}"
 
         paymentService.processPayment(envelope)
 
-        verify(exactly = 1) { kafkaTemplate.send("payment-processed", orderId.toString(), any()) }
+        verify(exactly = 1) { outboxEventRepository.save(any()) }
         verify(exactly = 1) { redisTemplate.hasKey("idempotency:payment:$orderId") }
         verify(exactly = 1) { redisTemplate.opsForValue().set("idempotency:payment:$orderId", "processed", 24, TimeUnit.HOURS) }
         verify(exactly = 1) { paymentRepository.save(any()) }
@@ -134,11 +134,12 @@ class PaymentServiceTest {
         every { paymentRepository.findByOrderId(orderId) } returns null andThen pendingPayment
         every { paymentProperties.failureRate } returns 1.0
         every { paymentRepository.save(any()) } returnsMany listOf(pendingPayment, savedRetrying)
-        every { kafkaTemplate.send(any(), any(), any()) } returns completedFuture()
+        every { outboxEventRepository.save(any()) } returns mockk()
+        every { objectMapper.writeValueAsString(any()) } returns "{}"
 
         paymentService.processPayment(envelope)
 
-        verify(exactly = 1) { kafkaTemplate.send("payment-retry", orderId.toString(), any()) }
+        verify(exactly = 1) { outboxEventRepository.save(any()) }
         verify(exactly = 1) { redisTemplate.hasKey("idempotency:payment:$orderId") }
         verify(exactly = 0) { redisTemplate.opsForValue() }
         verify(exactly = 1) { paymentRepository.save(any()) }
@@ -154,7 +155,7 @@ class PaymentServiceTest {
 
         paymentService.processPayment(envelope)
 
-        verify(exactly = 0) { kafkaTemplate.send(any(), any(), any()) }
+        verify(exactly = 0) { outboxEventRepository.save(any()) }
         verify(exactly = 0) { redisTemplate.opsForValue() }
         verify(exactly = 1) { redisTemplate.hasKey("idempotency:payment:$orderId") }
         verify(exactly = 0) { paymentRepository.save(any()) }
@@ -172,7 +173,7 @@ class PaymentServiceTest {
 
         paymentService.processPayment(envelope)
 
-        verify(exactly = 0) { kafkaTemplate.send(any(), any(), any()) }
+        verify(exactly = 0) { outboxEventRepository.save(any()) }
         verify(exactly = 0) { redisTemplate.opsForValue() }
         verify(exactly = 1) { redisTemplate.hasKey("idempotency:payment:$orderId") }
         verify(exactly = 0) { paymentRepository.save(any()) }
@@ -194,11 +195,12 @@ class PaymentServiceTest {
         every { paymentProperties.retry.delayMs } returns 0
         every { redisTemplate.opsForValue().set(any(), any(), any(), any()) } just Runs
         every { paymentRepository.save(any()) } returns saved
-        every { kafkaTemplate.send(any(), any(), any()) } returns completedFuture()
+        every { outboxEventRepository.save(any()) } returns mockk()
+        every { objectMapper.writeValueAsString(any()) } returns "{}"
 
         paymentService.processRetry(envelope)
 
-        verify(exactly = 1) { kafkaTemplate.send("payment-processed", orderId.toString(), any()) }
+        verify(exactly = 1) { outboxEventRepository.save(any()) }
         verify(exactly = 1) { redisTemplate.hasKey("idempotency:payment:$orderId") }
         verify(exactly = 1) { redisTemplate.opsForValue().set("idempotency:payment:$orderId", "processed", 24, TimeUnit.HOURS) }
         verify(exactly = 2) { paymentRepository.findByOrderId(orderId) }
@@ -218,11 +220,12 @@ class PaymentServiceTest {
         every { paymentProperties.retry.maxAttempts } returns 3
         every { paymentProperties.retry.delayMs } returns 0
         every { paymentRepository.save(any()) } returns existing
-        every { kafkaTemplate.send(any(), any(), any()) } returns completedFuture()
+        every { outboxEventRepository.save(any()) } returns mockk()
+        every { objectMapper.writeValueAsString(any()) } returns "{}"
 
         paymentService.processRetry(envelope)
 
-        verify(exactly = 1) { kafkaTemplate.send("payment-retry", orderId.toString(), any()) }
+        verify(exactly = 1) { outboxEventRepository.save(any()) }
         verify(exactly = 1) { redisTemplate.hasKey("idempotency:payment:$orderId") }
         verify(exactly = 0) { redisTemplate.opsForValue().set(any(), any(), any(), any()) }
         verify(exactly = 2) { paymentRepository.findByOrderId(orderId) }
@@ -240,11 +243,12 @@ class PaymentServiceTest {
         every { paymentRepository.findByOrderId(any()) } returns existing
         every { paymentProperties.retry.maxAttempts } returns 3
         every { paymentRepository.save(any()) } returns existing
-        every { kafkaTemplate.send(any(), any(), any()) } returns completedFuture()
+        every { outboxEventRepository.save(any()) } returns mockk()
+        every { objectMapper.writeValueAsString(any()) } returns "{}"
 
         paymentService.processRetry(envelope)
 
-        verify(exactly = 1) { kafkaTemplate.send("order-failed", orderId.toString(), any()) }
+        verify(exactly = 1) { outboxEventRepository.save(any()) }
         verify(exactly = 1) { redisTemplate.hasKey("idempotency:payment:$orderId") }
         verify(exactly = 0) { redisTemplate.opsForValue().set(any(), any(), any(), any()) }
         verify(exactly = 2) { paymentRepository.findByOrderId(orderId) }

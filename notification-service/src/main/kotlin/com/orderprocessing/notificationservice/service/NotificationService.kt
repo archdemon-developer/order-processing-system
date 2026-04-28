@@ -8,7 +8,6 @@ import org.springframework.stereotype.Service
 
 @Service
 class NotificationService {
-
     fun notifyOrderFailure(envelope: EventEnvelope<OrderFailed>) {
         println("Your order could not be processed. orderId=${envelope.payload.orderId}")
     }

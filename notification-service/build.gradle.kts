@@ -42,6 +42,7 @@ val integrationTest by tasks.registering(Test::class) {
 }
 
 tasks.jacocoTestReport {
+    dependsOn(tasks.test, integrationTest)
     executionData.setFrom(
         fileTree(layout.buildDirectory.get()) {
             include("jacoco/*.exec")
@@ -67,7 +68,9 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.springframework.kafka:spring-kafka")
 
-    implementation(project(":shared"))
+    implementation(project(":shared")) {
+        exclude(group = "org.springframework.boot", module = "spring-boot-starter-data-jpa")
+    }
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")

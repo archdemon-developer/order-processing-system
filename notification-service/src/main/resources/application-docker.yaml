@@ -1,2 +1,7 @@
 kafka:
   bootstrap-servers: kafka:9092
+
+notification:
+  error-handler:
+    back-off-interval-ms: 1000
+    back-off-max-attempts: 3

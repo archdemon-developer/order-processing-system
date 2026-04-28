@@ -8,4 +8,5 @@ data class EventEnvelope<T>(
     val eventType: String,
     val occurredAt: Instant,
     val payload: T,
+    val schemaVersion: Int = 1,
 )

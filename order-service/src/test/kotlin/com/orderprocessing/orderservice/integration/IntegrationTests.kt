@@ -6,24 +6,19 @@ import com.orderprocessing.orderservice.models.request.CreateOrderRequest
 import com.orderprocessing.orderservice.models.request.OrderItemRequest
 import com.orderprocessing.orderservice.models.response.CreateOrderResponse
 import com.orderprocessing.orderservice.repositories.OrderRepository
-import com.orderprocessing.shared.envelope.EventEnvelope
-import com.orderprocessing.shared.events.OrderPlaced
+import com.orderprocessing.orderservice.service.OrderService
+import com.orderprocessing.shared.outbox.OutboxEventRepository
 import io.mockk.every
-import org.apache.kafka.clients.consumer.ConsumerConfig
-import org.apache.kafka.clients.consumer.KafkaConsumer
-import org.apache.kafka.common.serialization.StringDeserializer
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
+import org.mockito.ArgumentMatchers.any
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection
-import org.springframework.kafka.core.KafkaTemplate
-import org.springframework.kafka.support.SendResult
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
@@ -33,9 +28,7 @@ import org.testcontainers.junit.jupiter.Testcontainers
 import org.testcontainers.kafka.KafkaContainer
 import org.testcontainers.postgresql.PostgreSQLContainer
 import java.math.BigDecimal
-import java.time.Duration
 import java.util.UUID
-import java.util.concurrent.CompletableFuture
 
 @Tag("integration")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -64,15 +57,18 @@ class IntegrationTests {
 
     @Autowired lateinit var orderRepository: OrderRepository
 
-    @MockkSpyBean lateinit var kafkaTemplate: KafkaTemplate<String, EventEnvelope<OrderPlaced>>
+    @Autowired lateinit var outboxEventRepository: OutboxEventRepository
+
+    @MockkSpyBean lateinit var orderService: OrderService
 
     @BeforeEach
     fun cleanUp() {
         orderRepository.deleteAll()
+        outboxEventRepository.deleteAll()
     }
 
     @Test
-    fun `POST orders - happy path - returns 201, persists order, publishes event`() {
+    fun `POST orders - happy path - returns 201, persists order and outbox event`() {
         val request =
             CreateOrderRequest(
                 customerId = UUID.randomUUID(),
@@ -97,18 +93,15 @@ class IntegrationTests {
         assertEquals("PENDING", response.status)
         assertEquals(BigDecimal("30.00"), response.totalPrice)
 
-        val saved = orderRepository.findById(response.orderId)
-        assertTrue(saved.isPresent)
-        assertEquals(request.customerId, saved.get().customerId)
+        val savedOrder = orderRepository.findById(response.orderId)
+        assertTrue(savedOrder.isPresent)
+        assertEquals(request.customerId, savedOrder.get().customerId)
 
-        createKafkaConsumer().use { consumer ->
-            consumer.subscribe(listOf("order-placed"))
-            val records = consumer.poll(Duration.ofSeconds(10))
-            assertFalse(records.isEmpty)
-            val value = records.first().value()
-            assertTrue(value.contains(response.orderId.toString()))
-            assertTrue(value.contains("order-placed"))
-        }
+        val outboxEvents = outboxEventRepository.findAll()
+        assertEquals(1, outboxEvents.size)
+        assertEquals("order-placed", outboxEvents[0].aggregatetype)
+        assertEquals(response.orderId.toString(), outboxEvents[0].aggregateid)
+        assertEquals("OrderPlaced", outboxEvents[0].type)
     }
 
     @Test
@@ -135,7 +128,7 @@ class IntegrationTests {
     }
 
     @Test
-    fun `POST orders - kafka failure - order not persisted`() {
+    fun `POST orders - outbox save failure - order not persisted`() {
         val request =
             CreateOrderRequest(
                 customerId = UUID.randomUUID(),
@@ -144,11 +137,8 @@ class IntegrationTests {
                         OrderItemRequest(productId = UUID.randomUUID(), quantity = 1, pricePerItem = BigDecimal("9.99")),
                     ),
             )
-        val failed =
-            CompletableFuture.failedFuture<SendResult<String, EventEnvelope<OrderPlaced>>>(
-                RuntimeException("Kafka unavailable"),
-            )
-        every { kafkaTemplate.send(any<String>(), any<String>(), any()) } returns failed
+
+        every { orderService.createOrder(any()) } throws RuntimeException("DB unavailable")
 
         restTestClient
             .post()
@@ -160,15 +150,4 @@ class IntegrationTests {
 
         assertEquals(0L, orderRepository.count())
     }
-
-    private fun createKafkaConsumer(): KafkaConsumer<String, String> =
-        KafkaConsumer(
-            mapOf(
-                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG to kafka.bootstrapServers,
-                ConsumerConfig.GROUP_ID_CONFIG to "test-group",
-                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG to "earliest",
-                ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG to StringDeserializer::class.java,
-                ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG to StringDeserializer::class.java,
-            ),
-        )
 }

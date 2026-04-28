@@ -33,7 +33,6 @@ import java.util.concurrent.TimeUnit
 @ActiveProfiles("test")
 @DirtiesContext
 class NotificationIntegrationTests {
-
     companion object {
         @JvmStatic
         @Container
@@ -47,7 +46,7 @@ class NotificationIntegrationTests {
     }
 
     @Autowired
-    lateinit var kafkaTemplate: KafkaTemplate<String, EventEnvelope<*>>
+    lateinit var testKafkaTemplate: KafkaTemplate<String, EventEnvelope<*>>
 
     @MockkSpyBean
     lateinit var notificationService: NotificationService
@@ -55,24 +54,26 @@ class NotificationIntegrationTests {
     @Test
     fun `payment processed - notifyOrderSuccess is invoked`() {
         val latch = CountDownLatch(1)
-        val payload = PaymentProcessed(
-            orderId = UUID.randomUUID(),
-            transactionId = UUID.randomUUID(),
-            customerId = UUID.randomUUID(),
-        )
-        val envelope = EventEnvelope(
-            eventId = UUID.randomUUID(),
-            eventType = "payment-processed",
-            occurredAt = Instant.now(),
-            payload = payload,
-        )
+        val payload =
+            PaymentProcessed(
+                orderId = UUID.randomUUID(),
+                transactionId = UUID.randomUUID(),
+                customerId = UUID.randomUUID(),
+            )
+        val envelope =
+            EventEnvelope(
+                eventId = UUID.randomUUID(),
+                eventType = "payment-processed",
+                occurredAt = Instant.now(),
+                payload = payload,
+            )
 
         every { notificationService.notifyOrderSuccess(any()) } answers {
             callOriginal()
             latch.countDown()
         }
 
-        kafkaTemplate.send("payment-processed", payload.orderId.toString(), envelope)
+        testKafkaTemplate.send("payment-processed", payload.orderId.toString(), envelope)
 
         latch.await(10, TimeUnit.SECONDS)
         verify(exactly = 1) { notificationService.notifyOrderSuccess(any()) }
@@ -81,24 +82,26 @@ class NotificationIntegrationTests {
     @Test
     fun `order failed - notifyOrderFailure is invoked`() {
         val latch = CountDownLatch(1)
-        val payload = OrderFailed(
-            orderId = UUID.randomUUID(),
-            customerId = UUID.randomUUID(),
-            reason = "Order processing failed",
-        )
-        val envelope = EventEnvelope(
-            eventId = UUID.randomUUID(),
-            eventType = "order-failed",
-            occurredAt = Instant.now(),
-            payload = payload,
-        )
+        val payload =
+            OrderFailed(
+                orderId = UUID.randomUUID(),
+                customerId = UUID.randomUUID(),
+                reason = "Order processing failed",
+            )
+        val envelope =
+            EventEnvelope(
+                eventId = UUID.randomUUID(),
+                eventType = "order-failed",
+                occurredAt = Instant.now(),
+                payload = payload,
+            )
 
         every { notificationService.notifyOrderFailure(any()) } answers {
             callOriginal()
             latch.countDown()
         }
 
-        kafkaTemplate.send("order-failed", payload.orderId.toString(), envelope)
+        testKafkaTemplate.send("order-failed", payload.orderId.toString(), envelope)
 
         latch.await(10, TimeUnit.SECONDS)
         verify(exactly = 1) { notificationService.notifyOrderFailure(any()) }

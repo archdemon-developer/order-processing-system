@@ -1,16 +1,13 @@
 package com.orderprocessing.paymentservice.integration
 
-import com.orderprocessing.paymentservice.PaymentServiceApplication
+import com.orderprocessing.paymentservice.configuration.TestKafkaConfig
 import com.orderprocessing.paymentservice.repositories.PaymentRepository
 import com.orderprocessing.shared.envelope.EventEnvelope
 import com.orderprocessing.shared.events.OrderPlaced
 import com.orderprocessing.shared.model.OrderItem
+import com.orderprocessing.shared.outbox.OutboxEventRepository
 import com.redis.testcontainers.RedisContainer
-import org.apache.kafka.clients.consumer.ConsumerConfig
-import org.apache.kafka.clients.consumer.KafkaConsumer
-import org.apache.kafka.common.serialization.StringDeserializer
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Tag
@@ -19,6 +16,7 @@ import org.junit.jupiter.api.assertNotNull
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection
+import org.springframework.context.annotation.Import
 import org.springframework.data.redis.core.RedisTemplate
 import org.springframework.kafka.core.KafkaTemplate
 import org.springframework.test.annotation.DirtiesContext
@@ -29,8 +27,8 @@ import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
 import org.testcontainers.kafka.KafkaContainer
 import org.testcontainers.postgresql.PostgreSQLContainer
+import tools.jackson.databind.json.JsonMapper
 import java.math.BigDecimal
-import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import kotlin.time.Duration.Companion.milliseconds
@@ -38,9 +36,8 @@ import kotlin.time.toJavaDuration
 
 @Tag("integration")
 @Testcontainers
-@SpringBootTest(
-    webEnvironment = SpringBootTest.WebEnvironment.NONE,
-)
+@Import(TestKafkaConfig::class)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @ActiveProfiles("test")
 @DirtiesContext
 class PaymentSuccessIntegrationTests {
@@ -66,7 +63,9 @@ class PaymentSuccessIntegrationTests {
             registry.add("kafka.bootstrap-servers") { kafka.bootstrapServers }
             registry.add("payment.failure-rate") { 0.0 }
             registry.add("payment.retry.max-attempts") { 3 }
-            registry.add("payment.retry.delay-ms") { Duration.ofMillis(500L) }
+            registry.add("payment.retry.delay-ms") { 500 }
+            registry.add("payment.error-handler.back-off-interval-ms") { 1000 }
+            registry.add("payment.error-handler.back-off-max-attempts") { 3 }
             registry.add("spring.data.redis.host") { redis.host }
             registry.add("spring.data.redis.port") { redis.firstMappedPort }
         }
@@ -78,21 +77,23 @@ class PaymentSuccessIntegrationTests {
 
     @Autowired lateinit var paymentRepository: PaymentRepository
 
+    @Autowired lateinit var outboxEventRepository: OutboxEventRepository
+
+    @Autowired lateinit var jsonMapper: JsonMapper
+
     @BeforeEach
     fun cleanUp() {
         paymentRepository.deleteAll()
+        outboxEventRepository.deleteAll()
     }
 
     @Test
-    fun `payment flow happy path - message successfully processed, db record saved and kafka sends payment processed request`() {
+    fun `payment flow happy path - message successfully processed, db record saved and outbox event written`() {
         val orderPlaced =
             OrderPlaced(
                 orderId = UUID.randomUUID(),
                 customerId = UUID.randomUUID(),
-                items =
-                    listOf(
-                        OrderItem(productId = UUID.randomUUID(), quantity = 2, pricePerItem = BigDecimal("10.00")),
-                    ),
+                items = listOf(OrderItem(productId = UUID.randomUUID(), quantity = 2, pricePerItem = BigDecimal("10.00"))),
                 totalPrice = BigDecimal("20.00"),
             )
 
@@ -109,29 +110,16 @@ class PaymentSuccessIntegrationTests {
                 ),
             ).get()
 
-        createKafkaConsumer().use { consumer ->
-            consumer.subscribe(listOf("payment-processed"))
-            val records = consumer.poll(Duration.ofSeconds(10))
-            assertFalse(records.isEmpty)
-            val value = records.first().value()
-            assertTrue(value.contains(orderPlaced.orderId.toString()))
-            assertTrue(value.contains("payment-processed"))
-        }
+        Thread.sleep(3000.milliseconds.toJavaDuration())
 
         val saved = paymentRepository.findByOrderId(orderPlaced.orderId)
         assertNotNull(saved)
-        assertEquals(orderPlaced.customerId, saved.customerId)
+        assertEquals(orderPlaced.customerId, saved!!.customerId)
         assertTrue(redisTemplate.hasKey("idempotency:payment:${orderPlaced.orderId}"))
-    }
 
-    private fun createKafkaConsumer(): KafkaConsumer<String, String> =
-        KafkaConsumer(
-            mapOf(
-                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG to kafka.bootstrapServers,
-                ConsumerConfig.GROUP_ID_CONFIG to "test-group",
-                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG to "earliest",
-                ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG to StringDeserializer::class.java,
-                ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG to StringDeserializer::class.java,
-            ),
-        )
+        val outboxEvents = outboxEventRepository.findAll()
+        assertEquals(1, outboxEvents.size)
+        assertEquals("payment-processed", outboxEvents[0].aggregatetype)
+        assertEquals(orderPlaced.orderId.toString(), outboxEvents[0].aggregateid)
+    }
 }

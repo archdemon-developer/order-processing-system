@@ -9,12 +9,14 @@ import com.orderprocessing.shared.events.OrderFailed
 import com.orderprocessing.shared.events.OrderPlaced
 import com.orderprocessing.shared.events.PaymentProcessed
 import com.orderprocessing.shared.events.PaymentRetry
+import com.orderprocessing.shared.outbox.OutboxEvent
+import com.orderprocessing.shared.outbox.OutboxEventRepository
 import org.springframework.data.redis.core.RedisTemplate
-import org.springframework.kafka.core.KafkaTemplate
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
+import tools.jackson.databind.json.JsonMapper
 import java.time.Instant
 import java.util.UUID
-import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
 import kotlin.random.Random
 import kotlin.time.Duration.Companion.milliseconds
@@ -24,9 +26,11 @@ import kotlin.time.toJavaDuration
 class PaymentService(
     private val paymentProperties: PaymentProperties,
     private val paymentRepository: PaymentRepository,
-    private val kafkaTemplate: KafkaTemplate<String, EventEnvelope<*>>,
+    private val outboxEventRepository: OutboxEventRepository,
+    private val objectMapper: JsonMapper,
     private val redisTemplate: RedisTemplate<String, String>,
 ) {
+    @Transactional
     fun processPayment(envelope: EventEnvelope<OrderPlaced>) {
         if (isAlreadyProcessed(envelope.payload.orderId)) {
             return
@@ -40,12 +44,12 @@ class PaymentService(
 
         val failedPayment = buildPayment(envelope.payload, PaymentStatus.RETRYING, null)
         paymentRepository.save(failedPayment)
-        try {
-            kafkaTemplate.send(
-                "payment-retry",
-                failedPayment.orderId.toString(),
-                buildEnvelope(
-                    "payment-retry",
+        outboxEventRepository.save(
+            buildOutboxEvent(
+                aggregatetype = "payment-retry",
+                aggregateid = envelope.payload.orderId.toString(),
+                type = "PaymentRetry",
+                payload =
                     PaymentRetry(
                         orderId = envelope.payload.orderId,
                         customerId = envelope.payload.customerId,
@@ -53,16 +57,11 @@ class PaymentService(
                         totalPrice = envelope.payload.totalPrice,
                         attempts = 1,
                     ),
-                ),
-            ).get()
-        } catch (e: ExecutionException) {
-            throw RuntimeException("Failed to publish payment retry event", e.cause)
-        } catch (e: InterruptedException) {
-            Thread.currentThread().interrupt()
-            throw RuntimeException("Interrupted while publishing payment retry event", e)
-        }
+            ),
+        )
     }
 
+    @Transactional
     fun processRetry(envelope: EventEnvelope<PaymentRetry>) {
         if (isAlreadyProcessed(envelope.payload.orderId)) {
             return
@@ -74,25 +73,19 @@ class PaymentService(
         if (envelope.payload.attempts >= paymentProperties.retry.maxAttempts) {
             earlierPayment.status = PaymentStatus.FAILED
             paymentRepository.save(earlierPayment)
-            try {
-                kafkaTemplate.send(
-                    "order-failed",
-                    earlierPayment.orderId.toString(),
-                    buildEnvelope(
-                        "order-failed",
+            outboxEventRepository.save(
+                buildOutboxEvent(
+                    aggregatetype = "order-failed",
+                    aggregateid = envelope.payload.orderId.toString(),
+                    type = "OrderFailed",
+                    payload =
                         OrderFailed(
                             orderId = envelope.payload.orderId,
                             customerId = envelope.payload.customerId,
                             reason = "Order processing failed",
                         ),
-                    ),
-                ).get()
-            } catch (e: ExecutionException) {
-                throw RuntimeException("Failed to publish payment retry event", e.cause)
-            } catch (e: InterruptedException) {
-                Thread.currentThread().interrupt()
-                throw RuntimeException("Interrupted while publishing payment retry event", e)
-            }
+                ),
+            )
             return
         }
 
@@ -109,57 +102,42 @@ class PaymentService(
 
         earlierPayment.attempts = envelope.payload.attempts + 1
         paymentRepository.save(earlierPayment)
-        try {
-            kafkaTemplate
-                .send(
-                    "payment-retry",
-                    earlierPayment.orderId.toString(),
-                    buildEnvelope(
-                        "payment-retry",
-                        PaymentRetry(
-                            orderId = envelope.payload.orderId,
-                            customerId = envelope.payload.customerId,
-                            items = envelope.payload.items,
-                            totalPrice = envelope.payload.totalPrice,
-                            attempts = envelope.payload.attempts + 1,
-                        ),
+        outboxEventRepository.save(
+            buildOutboxEvent(
+                aggregatetype = "payment-retry",
+                aggregateid = envelope.payload.orderId.toString(),
+                type = "PaymentRetry",
+                payload =
+                    PaymentRetry(
+                        orderId = envelope.payload.orderId,
+                        customerId = envelope.payload.customerId,
+                        items = envelope.payload.items,
+                        totalPrice = envelope.payload.totalPrice,
+                        attempts = envelope.payload.attempts + 1,
                     ),
-                ).get()
-        } catch (e: ExecutionException) {
-            throw RuntimeException("Failed to publish payment retry event", e.cause)
-        } catch (e: InterruptedException) {
-            Thread.currentThread().interrupt()
-            throw RuntimeException("Interrupted while publishing payment retry event", e)
-        }
+            ),
+        )
     }
 
-    private fun handleSuccess(
-        payment: Payment,
-    ) {
+    @Transactional
+    private fun handleSuccess(payment: Payment) {
         paymentRepository.save(payment)
-
         redisTemplate
             .opsForValue()
-            .set("idempotency:payment:$payment.orderId", "processed", 24, TimeUnit.HOURS)
-        try {
-            kafkaTemplate.send(
-                "payment-processed",
-                payment.orderId.toString(),
-                buildEnvelope(
-                    "payment-processed",
+            .set("idempotency:payment:${payment.orderId}", "processed", 24, TimeUnit.HOURS)
+        outboxEventRepository.save(
+            buildOutboxEvent(
+                aggregatetype = "payment-processed",
+                aggregateid = payment.orderId.toString(),
+                type = "PaymentProcessed",
+                payload =
                     PaymentProcessed(
                         orderId = payment.orderId,
                         transactionId = payment.transactionId!!,
                         customerId = payment.customerId,
                     ),
-                ),
-            ).get()
-        } catch (e: ExecutionException) {
-            throw RuntimeException("Failed to publish payment retry event", e.cause)
-        } catch (e: InterruptedException) {
-            Thread.currentThread().interrupt()
-            throw RuntimeException("Interrupted while publishing payment retry event", e)
-        }
+            ),
+        )
     }
 
     private fun buildPayment(
@@ -175,6 +153,27 @@ class PaymentService(
             attempts = 1
         }
 
+    private fun buildOutboxEvent(
+        aggregatetype: String,
+        aggregateid: String,
+        type: String,
+        payload: Any,
+    ): OutboxEvent =
+        OutboxEvent().apply {
+            this.aggregatetype = aggregatetype
+            this.aggregateid = aggregateid
+            this.type = type
+            this.payload =
+                objectMapper.writeValueAsString(
+                    EventEnvelope(
+                        eventId = UUID.randomUUID(),
+                        eventType = aggregatetype,
+                        occurredAt = Instant.now(),
+                        payload = payload,
+                    ),
+                )
+        }
+
     private fun isAlreadyProcessed(orderId: UUID): Boolean {
         if (redisTemplate.hasKey("idempotency:payment:$orderId") ?: false) return true
         val payment = paymentRepository.findByOrderId(orderId) ?: return false
@@ -182,15 +181,4 @@ class PaymentService(
     }
 
     private fun simulatePayment(): Boolean = Random.nextDouble() > paymentProperties.failureRate
-
-    private fun <T> buildEnvelope(
-        eventType: String,
-        payload: T,
-    ): EventEnvelope<T> =
-        EventEnvelope(
-            eventId = UUID.randomUUID(),
-            eventType = eventType,
-            payload = payload,
-            occurredAt = Instant.now(),
-        )
 }

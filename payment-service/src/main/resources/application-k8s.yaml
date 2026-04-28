@@ -27,3 +27,20 @@ payment:
   retry:
     max-attempts: 3
     delay-ms: 2000
+  error-handler:
+    back-off-interval-ms: 1000
+    back-off-max-attempts: 3
+
+outbox:
+  retention-hours: 24
+  cleanup-interval-ms: 3600000
+
+connect:
+  url: http://kafka-connect-1:8083
+  connector-names:
+    - debezium-orders-outbox
+
+management:
+  endpoint:
+    health:
+      show-details: always
