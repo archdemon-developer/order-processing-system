@@ -85,6 +85,9 @@ integration-tests:
 coverage:
   stage: coverage
   image: eclipse-temurin:21-jdk-alpine
+  dependencies:
+    - unit-tests
+    - integration-tests
   script:
     - ./gradlew :shared:jacocoTestReport :shared:jacocoCoverageVerification --no-daemon
     - ./gradlew :order-service:jacocoTestReport :order-service:jacocoCoverageVerification --no-daemon
