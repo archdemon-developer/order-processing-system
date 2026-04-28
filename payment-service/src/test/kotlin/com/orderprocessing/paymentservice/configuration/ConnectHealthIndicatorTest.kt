@@ -55,4 +55,13 @@ class ConnectHealthIndicatorTest {
         val health = indicator.health()
         assertEquals("DOWN", health.status.code)
     }
+
+    @Test
+    fun `health returns DOWN when response is null`() {
+        every { responseSpec.body(ConnectorStatusResponse::class.java) } returns null
+
+        val health = indicator.health()
+        assertEquals("DOWN", health.status.code)
+        assertEquals("UNKNOWN", health.details["state"])
+    }
 }
