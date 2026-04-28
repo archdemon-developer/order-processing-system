@@ -43,7 +43,6 @@ val integrationTest by tasks.registering(Test::class) {
 }
 
 tasks.jacocoTestReport {
-    dependsOn(tasks.test, integrationTest)
     executionData.setFrom(
         fileTree(layout.buildDirectory.get()) {
             include("jacoco/*.exec")
