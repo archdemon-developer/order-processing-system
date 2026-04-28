@@ -4,4 +4,4 @@
 **/*.iml
 **/out
 .git
-.gitlab-ci.yml
+.github/

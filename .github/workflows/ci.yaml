@@ -9,7 +9,7 @@ env:
   GRADLE_OPTS: "-Dorg.gradle.daemon=false"
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ghcr.io/archdemon-developer/order-processing-system
-
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 jobs:
 
   # ─── VALIDATE ───────────────────────────────────────────────────────────────

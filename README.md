@@ -35,22 +35,22 @@ Client → order-service (REST)
 
 ## Tech Stack
 
-| Concern | Technology |
-|---|---|
-| Language | Kotlin 2.x (JVM 21) |
-| Framework | Spring Boot 4.x |
-| Build | Gradle (Kotlin DSL), multi-module monorepo |
-| Messaging | Apache Kafka (KRaft mode), Kafka Streams |
-| CDC / Outbox Relay | Kafka Connect + Debezium PostgreSQL connector |
+| Concern | Technology                                                                   |
+|---|------------------------------------------------------------------------------|
+| Language | Kotlin 2.x (JVM 21)                                                          |
+| Framework | Spring Boot 4.x                                                              |
+| Build | Gradle (Kotlin DSL), multi-module monorepo                                   |
+| Messaging | Apache Kafka (KRaft mode), Kafka Streams                                     |
+| CDC / Outbox Relay | Kafka Connect + Debezium PostgreSQL connector                                |
 | Serialization | Custom Jackson-based `EventSerializer` / `EventDeserializer` (shared module) |
-| Database | PostgreSQL 17 (one logical DB per service) |
-| Cache / Idempotency | Redis (`payment-service`) |
-| API Docs | springdoc-openapi 3.x (Swagger UI) |
-| Containerisation | Docker, Docker Compose |
-| Orchestration | Minikube + Helm |
-| Observability | OpenTelemetry, Prometheus, Grafana, Loki, Tempo |
-| CI/CD | GitLab CI |
-| Code Quality | Spotless + ktlint |
+| Database | PostgreSQL 17 (one logical DB per service)                                   |
+| Cache / Idempotency | Redis (`payment-service`)                                                    |
+| API Docs | springdoc-openapi 3.x (Swagger UI)                                           |
+| Containerisation | Docker, Docker Compose                                                       |
+| Orchestration | Minikube + Helm                                                              |
+| Observability | OpenTelemetry, Prometheus, Grafana, Loki, Tempo                              |
+| CI/CD | Github Actions                                                               |
+| Code Quality | Spotless + ktlint                                                            |
 
 ---
 
@@ -95,7 +95,7 @@ order-processing-system/
 │   │   └── connect-secrets.properties  # gitignored — local dev only
 │   └── postgres/init.sql
 ├── .dockerignore
-├── .gitlab-ci.yml
+├── .github/workflows/ci.yaml
 ├── build.gradle.kts
 └── settings.gradle.kts
 ```
@@ -409,7 +409,7 @@ All services emit traces, metrics, and structured logs via OpenTelemetry:
 - [x] `order-service` — unit tests + integration tests, JaCoCo coverage
 - [x] `order-service` — multi-stage Dockerfile, added to Docker Compose
 - [x] Code quality — Spotless + ktlint
-- [x] GitLab CI pipeline
+- [x] Github CI pipeline
 - [x] `payment-service` — consumer, idempotency, retry, producers
 - [x] `payment-service` — unit tests + integration tests, JaCoCo coverage
 - [x] `payment-service` — Dockerfile, Docker Compose, CI updated
