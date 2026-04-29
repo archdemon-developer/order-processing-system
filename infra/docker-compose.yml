@@ -143,5 +143,18 @@ services:
       kafka:
         condition: service_healthy
 
+  analytics-service:
+    build:
+      context: ../
+      dockerfile: analytics-service/Dockerfile
+    container_name: analytics-service
+    ports:
+      - "8084:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    depends_on:
+      kafka:
+        condition: service_healthy
+
 volumes:
   postgres_data:

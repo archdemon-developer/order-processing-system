@@ -1,0 +1,10 @@
+kafka:
+  bootstrap-servers: kafka:9092
+
+analytics:
+  kafka:
+    application-id: analytics-service
+    state-dir: /tmp/kafka-streams
+
+server:
+  port: 8080

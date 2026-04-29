@@ -1,0 +1,1 @@
+ALTER TABLE payments ADD COLUMN total_price NUMERIC(19, 4) NOT NULL DEFAULT 0;

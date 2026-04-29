@@ -1,0 +1,11 @@
+server:
+  port: 0
+
+kafka:
+  bootstrap-servers: localhost:29092
+
+analytics:
+  kafka:
+    application-id: analytics-service-test
+    state-dir: /tmp/kafka-streams-test
+

@@ -28,29 +28,30 @@ Client → order-service (REST)
 | `order-service` | Accepts orders via REST, writes `order-placed` outbox event |
 | `payment-service` | Consumes `order-placed`, simulates payment with retry, writes `payment-processed` or `order-failed` outbox events |
 | `notification-service` | Consumes `payment-processed` and `order-failed`, sends mock notifications |
-| `analytics-service` | Kafka Streams consumer, real-time aggregations (coming soon) |
+| `analytics-service` | Kafka Streams consumer, real-time aggregations — orders per minute, top products, payment outcomes, confirmed revenue |
 | `inventory-service` | Deferred — standalone follow-on project |
 
 ---
 
 ## Tech Stack
 
-| Concern | Technology                                                                   |
-|---|------------------------------------------------------------------------------|
-| Language | Kotlin 2.x (JVM 21)                                                          |
-| Framework | Spring Boot 4.x                                                              |
-| Build | Gradle (Kotlin DSL), multi-module monorepo                                   |
-| Messaging | Apache Kafka (KRaft mode), Kafka Streams                                     |
-| CDC / Outbox Relay | Kafka Connect + Debezium PostgreSQL connector                                |
+| Concern | Technology |
+|---|---|
+| Language | Kotlin 2.x (JVM 21) |
+| Framework | Spring Boot 4.x |
+| Build | Gradle (Kotlin DSL), multi-module monorepo |
+| Messaging | Apache Kafka (KRaft mode), Kafka Streams |
+| CDC / Outbox Relay | Kafka Connect + Debezium PostgreSQL connector |
 | Serialization | Custom Jackson-based `EventSerializer` / `EventDeserializer` (shared module) |
-| Database | PostgreSQL 17 (one logical DB per service)                                   |
-| Cache / Idempotency | Redis (`payment-service`)                                                    |
-| API Docs | springdoc-openapi 3.x (Swagger UI)                                           |
-| Containerisation | Docker, Docker Compose                                                       |
-| Orchestration | Minikube + Helm                                                              |
-| Observability | OpenTelemetry, Prometheus, Grafana, Loki, Tempo                              |
-| CI/CD | Github Actions                                                               |
-| Code Quality | Spotless + ktlint                                                            |
+| Database | PostgreSQL 17 (one logical DB per service) |
+| Cache / Idempotency | Redis (`payment-service`) |
+| API Docs | springdoc-openapi 3.x (Swagger UI) |
+| Containerisation | Docker, Docker Compose |
+| Orchestration | Minikube + Helm |
+| Observability | OpenTelemetry, Prometheus, Grafana, Loki, Tempo |
+| CI/CD | GitHub Actions |
+| Code Quality | Spotless + ktlint |
+| Load Testing | k6 |
 
 ---
 
@@ -84,7 +85,11 @@ order-processing-system/
 │   ├── Dockerfile
 │   └── src/
 ├── analytics-service/
+│   ├── Dockerfile
+│   └── src/
 ├── inventory-service/              # Deferred — standalone follow-on project
+├── load-test/
+│   └── order-load-test.js          # k6 load test script
 ├── infra/
 │   ├── docker-compose.yml
 │   ├── kafka-connect/
@@ -108,8 +113,8 @@ order-processing-system/
 |---|---|---|---|
 | `order-placed` | Debezium (outbox) | `payment-service`, `analytics-service` | 7 days |
 | `payment-retry` | Debezium (outbox) | `payment-service` | 1 day |
-| `payment-processed` | Debezium (outbox) | `notification-service` | 7 days |
-| `order-failed` | Debezium (outbox) | `notification-service` | 7 days |
+| `payment-processed` | Debezium (outbox) | `notification-service`, `analytics-service` | 7 days |
+| `order-failed` | Debezium (outbox) | `notification-service`, `analytics-service` | 7 days |
 | `order-placed.DLT` | Spring Kafka error handler | — | 30 days |
 | `payment-retry.DLT` | Spring Kafka error handler | — | 30 days |
 | `payment-processed.DLT` | Spring Kafka error handler | — | 30 days |
@@ -132,7 +137,7 @@ order-processing-system/
 6. `notification-service` operates independent listeners per terminal event:
    - `payment-processed` → "Your payment was successful."
    - `order-failed` → "Your order could not be processed."
-7. `analytics-service` consumes `order-placed` for real-time aggregations (coming soon)
+7. `analytics-service` consumes `order-placed`, `payment-processed`, and `order-failed` for real-time aggregations via Kafka Streams
 
 ---
 
@@ -165,6 +170,21 @@ Swagger UI available at `http://localhost:8080/swagger-ui.html` when running loc
 
 ---
 
+## REST API — analytics-service
+
+Base path: `/api/v1/analytics`
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/analytics/orders-per-minute` | Count of orders placed in the current 1-minute tumbling window |
+| `GET` | `/api/v1/analytics/top-products` | Running count of orders per product ID |
+| `GET` | `/api/v1/analytics/payment-outcomes` | Running count of SUCCESS and FAILED payment outcomes |
+| `GET` | `/api/v1/analytics/confirmed-revenue` | Running total revenue from confirmed payments |
+
+Available at `http://localhost:8084` when running locally via Docker Compose.
+
+---
+
 ## Database Schemas
 
 ### order-service (`orders_db`)
@@ -191,13 +211,14 @@ TABLE outbox_events
 
 ```sql
 TABLE payments
-  id             UUID        PRIMARY KEY
-  order_id       UUID        NOT NULL UNIQUE
-  transaction_id UUID        UNIQUE
-  customer_id    UUID        NOT NULL
-  status         VARCHAR     NOT NULL  -- RETRYING | SUCCESS | FAILED
-  attempts       INT         NOT NULL DEFAULT 1
-  processed_at   TIMESTAMP   NOT NULL DEFAULT now()
+  id             UUID           PRIMARY KEY
+  order_id       UUID           NOT NULL UNIQUE
+  transaction_id UUID           UNIQUE
+  customer_id    UUID           NOT NULL
+  status         VARCHAR        NOT NULL  -- RETRYING | SUCCESS | FAILED
+  attempts       INT            NOT NULL DEFAULT 1
+  total_price    NUMERIC(19,4)  NOT NULL
+  processed_at   TIMESTAMP      NOT NULL DEFAULT now()
 
 TABLE outbox_events
   id             UUID        PRIMARY KEY
@@ -214,7 +235,7 @@ TABLE outbox_events
 No database. All notifications are mock (logged to stdout via `println`).
 
 ### analytics-service
-No relational database. State maintained in Kafka Streams state stores (RocksDB-backed).
+No relational database. State maintained in Kafka Streams state stores (RocksDB-backed). Four named stores: `orders-per-minute` (window store), `top-products`, `payment-outcomes`, `confirmed-revenue` (key-value stores).
 
 ---
 
@@ -251,6 +272,7 @@ This starts:
 - `order-service` — port `8080`
 - `payment-service` — no exposed port (Kafka consumer only)
 - `notification-service` — no exposed port (Kafka consumer only)
+- `analytics-service` — port `8084`
 
 To bring everything down:
 
@@ -278,6 +300,7 @@ Then run the service:
 ./gradlew :order-service:bootRun --no-daemon
 ./gradlew :payment-service:bootRun --no-daemon
 ./gradlew :notification-service:bootRun --no-daemon
+./gradlew :analytics-service:bootRun --no-daemon
 ```
 
 ### Spring Profiles
@@ -303,6 +326,54 @@ curl -X POST http://localhost:8083/connectors/debezium-orders-outbox/restart
 curl -X POST http://localhost:8083/connectors/debezium-payments-outbox/restart
 ```
 
+**Check Kafka consumer group lag:**
+```bash
+docker exec kafka /bin/kafka-consumer-groups --bootstrap-server localhost:9092 --describe --group payment-service
+docker exec kafka /bin/kafka-consumer-groups --bootstrap-server localhost:9092 --describe --group analytics-service
+```
+
+---
+
+## Load Testing
+
+A k6 load test script is included at `load-test/order-load-test.js`. It runs two concurrent scenarios — an order load scenario and an analytics poller — giving real-time visibility into consumer lag and revenue accumulation during the test.
+
+### Install k6
+
+```bash
+sudo apt-get install -y ca-certificates gnupg
+sudo mkdir -p /etc/apt/keyrings
+curl -fsSL https://dl.k6.io/key.gpg | sudo gpg --dearmor -o /etc/apt/keyrings/k6-archive-keyring.gpg
+echo "deb [signed-by=/etc/apt/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+sudo apt-get update
+sudo apt-get install k6
+```
+
+### Run the load test
+
+```bash
+k6 run load-test/order-load-test.js
+```
+
+In a second terminal, monitor Kafka consumer lag:
+
+```bash
+watch -n 5 'docker exec kafka /bin/kafka-consumer-groups --bootstrap-server localhost:9092 --describe --group payment-service'
+```
+
+### Observed Results (local Docker Compose, single host)
+
+| Metric | Value |
+|---|---|
+| Order throughput | ~270 req/s sustained |
+| p95 HTTP latency | 18ms |
+| p99 HTTP latency | ~25ms |
+| Error rate | 0% across 89,000+ requests |
+| Peak consumer lag (payment-service) | ~42,000 events at 500 VUs |
+| Debezium connector stability | RUNNING throughout entire test |
+
+**Bottleneck analysis:** `payment-service` consumer lag grows linearly above ~100 concurrent users. The root cause is `Thread.sleep` in the retry path — each failed payment blocks a consumer thread for the retry delay duration. At 500 VUs with a 30% failure rate, a significant fraction of consumer threads are sleeping simultaneously. The production fix is a delay topic pattern (publish to a delayed retry topic with a target timestamp, consume only when the delay has elapsed), which removes the blocking sleep entirely. This is documented as a known simplification below.
+
 ---
 
 ## Schema Evolution
@@ -312,6 +383,23 @@ curl -X POST http://localhost:8083/connectors/debezium-payments-outbox/restart
 - New optional fields with defaults are backward compatible — no version bump required
 - Field removal or type changes require a version bump and a documented migration path
 - Consumers ignore unknown fields (`FAIL_ON_UNKNOWN_PROPERTIES = false`)
+
+---
+
+## Analytics Service — Kafka Streams Design
+
+`analytics-service` uses Kafka Streams with a `String/String` default serde strategy. All source topics carry JSON strings. Deserialization to typed objects happens inside `mapValues` — typed objects never touch state stores or repartition topics, avoiding serde mismatches entirely.
+
+**Topology pipelines:**
+
+- `orders-per-minute` — `order-placed` → `groupByKey()` → `windowedBy(1 minute)` → `count()` → window store
+- `top-products` — `order-placed` → `flatMap()` (fan out per line item) → `groupByKey()` → `count()` → key-value store
+- `payment-outcomes` — `payment-processed` + `order-failed` → map to status string → `merge()` → `groupByKey()` → `count()` → key-value store
+- `confirmed-revenue` — `payment-processed` → extract `totalPrice` → `selectKey("total")` → `aggregate()` (running BigDecimal sum) → key-value store
+
+No stream-stream joins are used. Each event carries enough data to determine its outcome independently.
+
+**Note:** RocksDB (the default Kafka Streams state store backend) requires `libstdc++.so.6`. The `analytics-service` Dockerfile uses `eclipse-temurin:21-jre-jammy` (Ubuntu-based) as the runtime image rather than Alpine, which does not include this library.
 
 ---
 
@@ -334,9 +422,10 @@ JaCoCo enforces minimum coverage thresholds:
 | Branch | 80% |
 
 ```bash
-./gradlew :order-service:test :order-service:integrationTest :order-service:jacocoTestReport :order-service:jacocoCoverageVerification --no-daemon
-./gradlew :payment-service:test :payment-service:integrationTest :payment-service:jacocoTestReport :payment-service:jacocoCoverageVerification --no-daemon
-./gradlew :notification-service:test :notification-service:integrationTest :notification-service:jacocoTestReport :notification-service:jacocoCoverageVerification --no-daemon
+./gradlew :order-service:test :order-service:integrationTest --no-daemon
+./gradlew :payment-service:test :payment-service:integrationTest --no-daemon
+./gradlew :notification-service:test :notification-service:integrationTest --no-daemon
+./gradlew :analytics-service:test :analytics-service:integrationTest --no-daemon
 ```
 
 ---
@@ -348,7 +437,7 @@ JaCoCo enforces minimum coverage thresholds:
 | `validate` | Spotless formatting check | All branches |
 | `test` | Unit + integration tests (parallel) | All branches |
 | `coverage` | JaCoCo verification, reports as artifacts | All branches |
-| `build` | Build and push Docker images | `main` only |
+| `build` | Build and push Docker images for all services | `main` only |
 | `deploy` | Placeholder — Minikube/Helm (coming soon) | `main` only |
 
 ---
@@ -381,6 +470,9 @@ All services emit traces, metrics, and structured logs via OpenTelemetry:
 | Flyway owns the schema | `hibernate.ddl-auto=validate`. Hibernate validates, never modifies. |
 | KRaft mode | Confluent Platform 8.0 removed ZooKeeper. |
 | Idiomatic Kotlin throughout | Nullable types, `isTerminal` enum properties, Kotlin `Duration` extensions, `?: false` guards. Java idioms only at unavoidable interop boundaries. |
+| `totalPrice` on `PaymentProcessed` | `analytics-service` needs the confirmed payment amount to compute revenue. Carrying `totalPrice` on `PaymentProcessed` makes each event self-contained — no stream-stream join with `order-placed` required. |
+| `String/String` serdes in Kafka Streams | All Kafka Streams state stores and repartition topics use `String` values. Deserialization to typed objects happens inside `mapValues` in memory only. This avoids serde mismatches entirely and keeps the topology simple. |
+| `eclipse-temurin:21-jre-jammy` for analytics-service | RocksDB requires `libstdc++.so.6` which is not present in Alpine. The analytics-service runtime image uses Ubuntu Jammy to satisfy this native dependency. |
 
 ---
 
@@ -397,6 +489,8 @@ All services emit traces, metrics, and structured logs via OpenTelemetry:
 | No authentication / authorisation | JWT via Spring Security |
 | Testcontainers reuse not enabled | Enable reuse to reduce container startup cost on repeated local runs |
 | Blocking threading model | Kotlin coroutines — full-stack async architectural commitment |
+| `Thread.sleep` in payment retry path | Delay topic pattern — publish to a `payment-retry-delayed` topic with a target timestamp, consume only when delay has elapsed. Removes blocking sleep from consumer thread entirely, allowing payment-service to process at full throughput. |
+| Single Kafka partition per topic | Multiple partitions + multiple service instances for horizontal scaling |
 
 ---
 
@@ -409,7 +503,7 @@ All services emit traces, metrics, and structured logs via OpenTelemetry:
 - [x] `order-service` — unit tests + integration tests, JaCoCo coverage
 - [x] `order-service` — multi-stage Dockerfile, added to Docker Compose
 - [x] Code quality — Spotless + ktlint
-- [x] Github CI pipeline
+- [x] GitHub Actions CI pipeline
 - [x] `payment-service` — consumer, idempotency, retry, producers
 - [x] `payment-service` — unit tests + integration tests, JaCoCo coverage
 - [x] `payment-service` — Dockerfile, Docker Compose, CI updated
@@ -418,6 +512,8 @@ All services emit traces, metrics, and structured logs via OpenTelemetry:
 - [x] `notification-service` — consumers, mock notifications, tests, Dockerfile, Docker Compose, CI updated
 - [x] `inventory-service` deferred
 - [x] Reliability pass — outbox pattern, Debezium CDC, Kafka Connect, DLTs, schema versioning
-- [ ] `analytics-service` — Kafka Streams topology
+- [x] `analytics-service` — Kafka Streams topology, state stores, REST query endpoints, unit + integration tests, Dockerfile, Docker Compose, CI updated
+- [x] Load testing — k6 script with analytics poller and consumer lag tracking
+- [ ] Payment retry delay topic — replace `Thread.sleep` with delay topic pattern
 - [ ] Observability — OpenTelemetry, Grafana dashboards
 - [ ] Kubernetes + Helm — Minikube manifests, Helm chart per service

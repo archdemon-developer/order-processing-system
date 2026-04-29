@@ -50,7 +50,7 @@ jobs:
           key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts') }}
           restore-keys: gradle-${{ runner.os }}-
       - name: Run unit tests
-        run: ./gradlew :shared:test :order-service:test :payment-service:test :notification-service:test --no-daemon
+        run: ./gradlew :shared:test :order-service:test :payment-service:test :analytics-service:test :notification-service:test --no-daemon
       - name: Upload unit test results
         if: always()
         uses: actions/upload-artifact@v4
@@ -85,7 +85,7 @@ jobs:
           key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts') }}
           restore-keys: gradle-${{ runner.os }}-
       - name: Run integration tests
-        run: ./gradlew :order-service:integrationTest :payment-service:integrationTest :notification-service:integrationTest --no-daemon
+        run: ./gradlew :order-service:integrationTest :payment-service:integrationTest :analytics-service:integrationTest :notification-service:integrationTest --no-daemon
       - name: Upload integration test results
         if: always()
         uses: actions/upload-artifact@v4
@@ -129,6 +129,7 @@ jobs:
           ./gradlew :order-service:jacocoTestReport :order-service:jacocoCoverageVerification --no-daemon
           ./gradlew :payment-service:jacocoTestReport :payment-service:jacocoCoverageVerification --no-daemon
           ./gradlew :notification-service:jacocoTestReport :notification-service:jacocoCoverageVerification --no-daemon
+          ./gradlew :analytics-service:jacocoTestReport :analytics-service:jacocoCoverageVerification --no-daemon
       - name: Upload coverage reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -209,6 +210,41 @@ jobs:
           docker push ${{ env.IMAGE_PREFIX }}/payment-service:${GITHUB_SHA::7}
           docker push ${{ env.IMAGE_PREFIX }}/payment-service:latest
 
+  build-analytics-service:
+    name: Build analytics-service
+    runs-on: ubuntu-latest
+    needs: [ spotless, coverage ]
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: temurin
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/caches
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts') }}
+          restore-keys: gradle-${{ runner.os }}-
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push analytics-service
+        run: |
+          docker build \
+            -t ${{ env.IMAGE_PREFIX }}/analytics-service:${GITHUB_SHA::7} \
+            -t ${{ env.IMAGE_PREFIX }}/analytics-service:latest \
+            -f analytics-service/Dockerfile .
+          docker push ${{ env.IMAGE_PREFIX }}/analytics-service:${GITHUB_SHA::7}
+          docker push ${{ env.IMAGE_PREFIX }}/analytics-service:latest
+
   build-notification-service:
     name: Build notification-service
     runs-on: ubuntu-latest
@@ -243,13 +279,14 @@ jobs:
             -f notification-service/Dockerfile .
           docker push ${{ env.IMAGE_PREFIX }}/notification-service:${GITHUB_SHA::7}
           docker push ${{ env.IMAGE_PREFIX }}/notification-service:latest
+  
 
   # ─── DEPLOY ──────────────────────────────────────────────────────────────────
 
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
-    needs: [ build-order-service, build-payment-service, build-notification-service ]
+    needs: [ build-order-service, build-payment-service, build-notification-service, build-analytics-service ]
     if: github.ref == 'refs/heads/main'
     steps:
       - name: Deploy placeholder

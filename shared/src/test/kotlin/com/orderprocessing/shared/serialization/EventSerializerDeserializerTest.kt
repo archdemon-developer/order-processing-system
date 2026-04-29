@@ -94,6 +94,7 @@ class EventSerializerDeserializerTest {
                 orderId = UUID.randomUUID(),
                 customerId = UUID.randomUUID(),
                 transactionId = transactionId,
+                totalPrice = BigDecimal("15.00"),
             )
         val envelope =
             EventEnvelope(
