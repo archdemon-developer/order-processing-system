@@ -46,3 +46,4 @@ bin/
 
 ### custom ###
 infra/kafka-connect/connect-secrets.properties
+infra/.env

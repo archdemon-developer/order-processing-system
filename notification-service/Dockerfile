@@ -1,7 +1,10 @@
 FROM eclipse-temurin:21-jdk-alpine AS builder
 WORKDIR /app
+COPY gradlew .
+COPY gradle/ gradle/
+RUN ./gradlew --version --no-daemon -Dorg.gradle.internal.http.socketTimeout=120000 -Dorg.gradle.internal.http.connectionTimeout=120000
 COPY . .
-RUN ./gradlew :notification-service:bootJar --no-daemon
+RUN ./gradlew :notification-service:bootJar --no-daemon -Dorg.gradle.internal.http.socketTimeout=120000 -Dorg.gradle.internal.http.connectionTimeout=120000
 
 FROM eclipse-temurin:21-jdk-alpine AS extractor
 WORKDIR /app
