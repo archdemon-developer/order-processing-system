@@ -1,5 +1,13 @@
 kafka:
   bootstrap-servers: kafka:9092
+  security:
+    protocol: SASL_PLAINTEXT
+  properties:
+    sasl.mechanism: SCRAM-SHA-512
+    sasl.jaas.config: >
+      org.apache.kafka.common.security.scram.ScramLoginModule required
+      username="${KAFKA_CLIENT_USERNAME}"
+      password="${KAFKA_CLIENT_PASSWORD}";
 
 analytics:
   kafka:

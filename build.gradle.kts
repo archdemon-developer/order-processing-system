@@ -1,9 +1,9 @@
 plugins {
-    kotlin("jvm") version "2.2.21" apply false
-    kotlin("plugin.spring") version "2.2.21" apply false
-    kotlin("plugin.jpa") version "2.2.21" apply false
-    id("org.springframework.boot") version "4.0.4" apply false
-    id("com.diffplug.spotless") version "8.3.0" apply false
+    kotlin("jvm") version "2.4.0" apply false
+    kotlin("plugin.spring") version "2.4.0" apply false
+    kotlin("plugin.jpa") version "2.4.0" apply false
+    id("org.springframework.boot") version "4.1.0" apply false
+    id("com.diffplug.spotless") version "8.7.0" apply false
 }
 
 subprojects {

@@ -47,3 +47,4 @@ bin/
 ### custom ###
 infra/kafka-connect/connect-secrets.properties
 infra/.env
+infra/kafka/kafka_server_jaas.conf

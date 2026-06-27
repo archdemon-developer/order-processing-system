@@ -4,8 +4,10 @@ import com.orderprocessing.shared.envelope.EventEnvelope
 import com.orderprocessing.shared.events.OrderFailed
 import com.orderprocessing.shared.events.PaymentProcessed
 import com.orderprocessing.shared.serialization.EventDeserializer
+import org.apache.kafka.clients.CommonClientConfigs
 import org.apache.kafka.clients.consumer.ConsumerConfig
 import org.apache.kafka.clients.producer.ProducerConfig
+import org.apache.kafka.common.config.SaslConfigs
 import org.apache.kafka.common.serialization.StringDeserializer
 import org.apache.kafka.common.serialization.StringSerializer
 import org.springframework.beans.factory.annotation.Value
@@ -24,15 +26,25 @@ import tools.jackson.core.type.TypeReference
 @Configuration
 class KafkaConfig(
     @param:Value($$"${kafka.bootstrap-servers}") private val bootstrapServers: String,
+    @param:Value($$"${kafka.security.protocol:PLAINTEXT}") private val securityProtocol: String,
+    @param:Value($$"${kafka.properties.sasl.mechanism:}") private val saslMechanism: String,
+    @param:Value($$"${kafka.properties.sasl.jaas.config:}") private val saslJaasConfig: String,
     private val notificationProperties: NotificationProperties,
 ) {
+    private fun securityProps(): Map<String, Any> =
+        buildMap {
+            put(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, securityProtocol)
+            if (saslMechanism.isNotBlank()) put(SaslConfigs.SASL_MECHANISM, saslMechanism)
+            if (saslJaasConfig.isNotBlank()) put(SaslConfigs.SASL_JAAS_CONFIG, saslJaasConfig)
+        }
+
     @Bean
     fun paymentProcessedConsumerFactory(): ConsumerFactory<String, EventEnvelope<PaymentProcessed>> {
         val config =
             mapOf(
                 ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG to bootstrapServers,
                 ConsumerConfig.GROUP_ID_CONFIG to "notification-service",
-            )
+            ) + securityProps()
 
         return DefaultKafkaConsumerFactory(
             config,
@@ -47,7 +59,8 @@ class KafkaConfig(
             mapOf(
                 ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG to bootstrapServers,
                 ConsumerConfig.GROUP_ID_CONFIG to "notification-service",
-            )
+            ) + securityProps()
+
         return DefaultKafkaConsumerFactory(
             config,
             StringDeserializer(),
@@ -87,7 +100,8 @@ class KafkaConfig(
                 ProducerConfig.BOOTSTRAP_SERVERS_CONFIG to bootstrapServers,
                 ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG to StringSerializer::class.java,
                 ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG to StringSerializer::class.java,
-            )
+            ) + securityProps()
+
         return KafkaTemplate(DefaultKafkaProducerFactory(config))
     }
 }

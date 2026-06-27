@@ -1,22 +1,24 @@
-FROM eclipse-temurin:21-jdk-alpine AS builder
+# --- Stage 1: Build ---
+FROM gradle:jdk21-alpine AS builder
 WORKDIR /app
-COPY gradlew .
-COPY gradle/ gradle/
-RUN ./gradlew --version --no-daemon -Dorg.gradle.internal.http.socketTimeout=120000 -Dorg.gradle.internal.http.connectionTimeout=120000
+COPY settings.gradle.kts build.gradle.kts ./
+COPY shared/build.gradle.kts ./shared/
+COPY notification-service/build.gradle.kts ./notification-service/
+RUN gradle :notification-service:dependencies --no-daemon || true
 COPY . .
-RUN ./gradlew :notification-service:bootJar --no-daemon -Dorg.gradle.internal.http.socketTimeout=120000 -Dorg.gradle.internal.http.connectionTimeout=120000
+RUN gradle :notification-service:bootJar --no-daemon
 
+# --- Stage 2: Extract ---
 FROM eclipse-temurin:21-jdk-alpine AS extractor
 WORKDIR /app
 COPY --from=builder /app/notification-service/build/libs/*.jar app.jar
-RUN java -Djarmode=tools -jar app.jar extract --layers --launcher
+RUN java -Djarmode=tools -jar app.jar extract --layers --launcher --destination extracted
 
+# --- Stage 3: Runtime ---
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
-
-COPY --from=extractor /app/app/dependencies/ ./
-COPY --from=extractor /app/app/spring-boot-loader/ ./
-COPY --from=extractor /app/app/snapshot-dependencies/ ./
-COPY --from=extractor /app/app/application/ ./
-
+COPY --from=extractor /app/extracted/dependencies/ ./
+COPY --from=extractor /app/extracted/spring-boot-loader/ ./
+COPY --from=extractor /app/extracted/snapshot-dependencies/ ./
+COPY --from=extractor /app/extracted/application/ ./
 ENTRYPOINT ["java", "org.springframework.boot.loader.launch.JarLauncher"]

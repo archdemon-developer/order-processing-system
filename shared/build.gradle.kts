@@ -46,10 +46,10 @@ tasks.withType<JacocoCoverageVerification> {
 }
 
 dependencies {
-    implementation(platform("org.springframework.boot:spring-boot-dependencies:4.0.4"))
+    implementation(platform("org.springframework.boot:spring-boot-dependencies:4.1.0"))
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
-    implementation(platform("tools.jackson:jackson-bom:3.1.0"))
-    implementation("tools.jackson.module:jackson-module-kotlin:3.1.0")
+    implementation(platform("tools.jackson:jackson-bom:3.2.0"))
+    implementation("tools.jackson.module:jackson-module-kotlin:3.2.0")
     implementation("org.apache.kafka:kafka-clients:4.2.0")
     testImplementation("org.junit.jupiter:junit-jupiter:6.0.3")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:6.0.3")

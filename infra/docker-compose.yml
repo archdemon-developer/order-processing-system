@@ -1,4 +1,18 @@
 services:
+  kafka-scram-init:
+    image: confluentinc/cp-kafka:8.0.0
+    container_name: kafka-scram-init
+    volumes:
+      - ./kafka/scram-init.sh:/scram-init.sh
+    entrypoint: ["bash", "/scram-init.sh"]
+    environment:
+      KAFKA_ADMIN_USERNAME: ${KAFKA_ADMIN_USERNAME}
+      KAFKA_ADMIN_PASSWORD: ${KAFKA_ADMIN_PASSWORD}
+      KAFKA_CLIENT_USERNAME: ${KAFKA_CLIENT_USERNAME}
+      KAFKA_CLIENT_PASSWORD: ${KAFKA_CLIENT_PASSWORD}
+    depends_on:
+      kafka:
+        condition: service_healthy
   kafka:
     image: confluentinc/cp-kafka:8.0.0
     container_name: kafka
@@ -9,18 +23,25 @@ services:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_LISTENERS: SASL_PLAINTEXT://0.0.0.0:9092,SASL_PLAINTEXT_HOST://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093,PLAINTEXT_INTERNAL://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: SASL_PLAINTEXT://kafka:9092,SASL_PLAINTEXT_HOST://localhost:29092,PLAINTEXT_INTERNAL://kafka:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: SASL_PLAINTEXT:SASL_PLAINTEXT,SASL_PLAINTEXT_HOST:SASL_PLAINTEXT,CONTROLLER:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_SASL_ENABLED_MECHANISMS: SCRAM-SHA-512
+      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: SCRAM-SHA-512
+      KAFKA_INTER_BROKER_LISTENER_NAME: SASL_PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+      KAFKA_OPTS: "-Djava.security.auth.login.config=/etc/kafka/kafka_server_jaas.conf"
+    volumes:
+      - ./kafka/kafka_server_jaas.conf:/etc/kafka/kafka_server_jaas.conf
+      - ./kafka/healthcheck-client.properties:/tmp/client.properties
     healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/localhost/9092"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 20s
 
   postgres:
     image: postgres:17-alpine
@@ -68,11 +89,20 @@ services:
       CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.storage.StringConverter
       CONNECT_CONFIG_PROVIDERS: file
       CONNECT_CONFIG_PROVIDERS_FILE_CLASS: org.apache.kafka.common.config.provider.FileConfigProvider
-    volumes:
-      - ./kafka-connect/connect-secrets.properties:/etc/kafka-connect/secrets/connect-secrets.properties
+      CONNECT_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      CONNECT_SASL_MECHANISM: SCRAM-SHA-512
+      CONNECT_SASL_JAAS_CONFIG: "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"${KAFKA_CLIENT_USERNAME}\" password=\"${KAFKA_CLIENT_PASSWORD}\";"
+      CONNECT_PRODUCER_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      CONNECT_PRODUCER_SASL_MECHANISM: SCRAM-SHA-512
+      CONNECT_PRODUCER_SASL_JAAS_CONFIG: "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"${KAFKA_CLIENT_USERNAME}\" password=\"${KAFKA_CLIENT_PASSWORD}\";"
+      CONNECT_CONSUMER_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      CONNECT_CONSUMER_SASL_MECHANISM: SCRAM-SHA-512
+      CONNECT_CONSUMER_SASL_JAAS_CONFIG: "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"${KAFKA_CLIENT_USERNAME}\" password=\"${KAFKA_CLIENT_PASSWORD}\";"
+      KAFKA_CLIENT_USERNAME: ${KAFKA_CLIENT_USERNAME}
+      KAFKA_CLIENT_PASSWORD: ${KAFKA_CLIENT_PASSWORD}
     depends_on:
-      kafka:
-        condition: service_healthy
+      kafka-scram-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
     healthcheck:
@@ -89,9 +119,12 @@ services:
       - ./kafka-connect/init-topics.sh:/init-topics.sh
       - ./kafka-connect/topics.conf:/topics.conf
     entrypoint: ["bash", "/init-topics.sh"]
+    environment:
+      KAFKA_ADMIN_USERNAME: ${KAFKA_ADMIN_USERNAME}
+      KAFKA_ADMIN_PASSWORD: ${KAFKA_ADMIN_PASSWORD}
     depends_on:
-      kafka:
-        condition: service_healthy
+      kafka-scram-init:
+        condition: service_completed_successfully
 
   connect-init:
     image: curlimages/curl:8.11.1
@@ -99,6 +132,9 @@ services:
     volumes:
       - ./kafka-connect/register-connectors.sh:/register-connectors.sh
     entrypoint: ["sh", "/register-connectors.sh"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     depends_on:
       kafka-connect-1:
         condition: service_healthy
@@ -130,6 +166,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       REDIS_PASSWORD: ${REDIS_PASSWORD}
+      KAFKA_CLIENT_USERNAME: ${KAFKA_CLIENT_USERNAME}
+      KAFKA_CLIENT_PASSWORD: ${KAFKA_CLIENT_PASSWORD}
     depends_on:
       kafka:
         condition: service_healthy
@@ -145,6 +183,8 @@ services:
     container_name: notification-service
     environment:
       SPRING_PROFILES_ACTIVE: docker
+      KAFKA_CLIENT_USERNAME: ${KAFKA_CLIENT_USERNAME}
+      KAFKA_CLIENT_PASSWORD: ${KAFKA_CLIENT_PASSWORD}
     depends_on:
       kafka:
         condition: service_healthy
@@ -158,6 +198,8 @@ services:
       - "8084:8080"
     environment:
       SPRING_PROFILES_ACTIVE: docker
+      KAFKA_CLIENT_USERNAME: ${KAFKA_CLIENT_USERNAME}
+      KAFKA_CLIENT_PASSWORD: ${KAFKA_CLIENT_PASSWORD}
     depends_on:
       kafka:
         condition: service_healthy
